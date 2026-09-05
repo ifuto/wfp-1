@@ -326,9 +326,13 @@
   }
 
   /* ---------- per-clip video render (WebCodecs) ---------- */
-  async function renderClip(clip, mediaBlob, ctx, encoder, opts, progressCb, fallbackCodecs) {
+  async function renderClip(clip, mediaBlob, ctx, encoder, opts, progressCb, fallbackCodecs, ctl) {
+    ctl = ctl || { aborted: false };
+    phase("WC: 読込開始 (" + Math.round(mediaBlob.size / 1048576) + "MB)");
     const ab = await mediaBlob.arrayBuffer();
+    phase("WC: デムックス中…");
     const { vt, samples } = await demuxVideo(ab);
+    phase("WC: " + samples.length + "サンプル (" + vt.codec + ")");
     if (fallbackCodecs && fallbackCodecs.has(vt.codec)) {
       const e = new Error("事前チェックでNGのコーデック: " + vt.codec);
       e.useFallback = true;
@@ -384,6 +388,7 @@
       output: (f) => frameQ.push(f),
       error: (e) => { if (!firstErr) firstErr = e; },
     });
+    phase("WC: デコーダー構成 " + vt.codec);
     try {
       decoder.configure(okCfg);
     } catch (e) {
@@ -395,8 +400,9 @@
 
     // drain loop: processes decoded frames with encoder backpressure
     const drain = (async () => {
+      let loggedFirst = false;
       while (true) {
-        if (firstErr) { while (frameQ.length) { try { frameQ.shift().close(); } catch (e) {} } return; }
+        if (firstErr || ctl.aborted) { while (frameQ.length) { try { frameQ.shift().close(); } catch (e) {} } return; }
         if (frameQ.length) {
           const f = frameQ.shift();
           try {
@@ -410,6 +416,7 @@
                 f.close();
               }
               processed++;
+              if (!loggedFirst) { loggedFirst = true; phase("WC: 初フレーム受信 ✓"); }
               progressCb(emitted, totalTicks);
             }
           } catch (e) { if (!firstErr) firstErr = e; try { f.close(); } catch (e2) {} }
@@ -425,17 +432,24 @@
     for (let i = 0; i < samples.length; i++) {
       if (samples[i].is_sync && usOf(samples[i]) <= inUs) start = i;
     }
+    const feedStart = Date.now();
     for (let i = start; i < samples.length; i++) {
-      if (firstErr || decoder.state !== "configured") break;
+      if (firstErr || ctl.aborted || decoder.state !== "configured") break;
       const sm = samples[i];
       const u = usOf(sm);
       if (u > outUs) break;
       // 未処理フレームを一定以下に保つ（メモリ爆発・勝手にcloseされるのを防ぐ）
       let guard = 0;
-      while (guard++ < 20000 && !firstErr && decoder.state === "configured" && (fed - processed > 6 || encoder.encodeQueueSize > 24)) {
+      while (guard++ < 20000 && !firstErr && !ctl.aborted && decoder.state === "configured" && (fed - processed > 6 || encoder.encodeQueueSize > 24)) {
         await sleep(2);
+        // フレームを1つも生産しないデコーダーを20秒で見限る
+        if (fed > 8 && processed === 0 && Date.now() - feedStart > 20000) {
+          firstErr = new Error("デコーダーがフレームを生成しません（" + vt.codec + "）");
+          break;
+        }
       }
-      if (firstErr || decoder.state !== "configured") break;
+      if (i > 0 && i % 300 === 0) phase("WC: feed " + i + "/" + samples.length + " (out " + processed + ")");
+      if (firstErr || ctl.aborted || decoder.state !== "configured") break;
       try {
         decoder.decode(new EncodedVideoChunk({
           type: sm.is_sync ? "key" : "delta",
@@ -449,11 +463,12 @@
         break;
       }
     }
-    if (!firstErr && decoder.state === "configured") {
+    if (!firstErr && !ctl.aborted && decoder.state === "configured") {
       try { await withTimeout(decoder.flush(), 30000, "デコーダーflushタイムアウト"); } catch (e) { if (!firstErr) firstErr = e; }
     }
     feedDone = true;
     await drain;
+    if (ctl.aborted) { const ex = new Error("中断されました"); ex.useFallback = true; throw ex; }
     try { decoder.close(); } catch (e) {}
     if (firstErr) {
       const ex = new Error("デコード失敗（" + vt.codec + " / " + clip.mediaName + "）: " + ((firstErr && firstErr.message) ? firstErr.message : String(firstErr)));
@@ -800,11 +815,13 @@
         // プローブ済みNG: 重い前処理（全サンプル解析）を飛ばして直接互換モードへ
         r = await renderClipViaVideoElement(c, blob, ctx, encoder, { w, h, fps }, pcb);
       } else {
+        const ctl = { aborted: false };
         try {
-          r = await renderClip(c, blob, ctx, encoder, { w, h, fps }, pcb, fallbackCodecs);
+          r = await withTimeout(renderClip(c, blob, ctx, encoder, { w, h, fps }, pcb, fallbackCodecs, ctl), 150000, "WebCodecs処理タイムアウト (" + (codecOf || "?") + ")");
         } catch (e) {
-          if (!e || !e.useFallback) throw e;
-          phase("→ WebCodecs失敗のため互換モードへ: " + (e.message || "").slice(0, 80));
+          ctl.aborted = true; // 裏で走り続けないように
+          phase("→ WebCodecs失敗(" + (e.message || "").slice(0, 60) + ")のため互換モードへ");
+          if (codecOf) fallbackCodecs.add(codecOf); // 以降の同コーデックは直接互換へ
           r = await renderClipViaVideoElement(c, blob, ctx, encoder, { w, h, fps }, pcb);
         }
       }
