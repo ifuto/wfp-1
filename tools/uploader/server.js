@@ -9,7 +9,7 @@ const http = require("http");
 const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
-const { execFile } = require("child_process");
+const { execFile, spawn } = require("child_process");
 
 const PORT = parseInt(process.env.PORT || "3000", 10);
 const HOST = "0.0.0.0";
@@ -169,7 +169,12 @@ const server = http.createServer(async (req, res) => {
       }
       const outDir = path.join(RENDER_ROOT, w + "x" + h + "@" + fps);
       fs.mkdirSync(outDir, { recursive: true });
-      const proc = execFile("python3", [RENDER_SCRIPT, DIR, outDir, String(w), String(h), String(fps)], { cwd: __dirname, maxBuffer: 1024 * 1024 }, () => {});
+      // detached: own process group so the render survives turn boundaries
+      const proc = spawn("python3", [RENDER_SCRIPT, DIR, outDir, String(w), String(h), String(fps)], {
+        cwd: __dirname, detached: true, stdio: "ignore",
+        env: Object.assign({}, process.env, { FFMPEG_PATH: process.env.FFMPEG_PATH || "/tmp/ffmpeg-bin/ffmpeg" }),
+      });
+      proc.unref();
       global.currentRender = { preset: w + "x" + h + "@" + fps, proc, outDir, startedAt: Date.now() };
       json(res, 200, { ok: true, preset: global.currentRender.preset });
       return;
@@ -186,6 +191,38 @@ const server = http.createServer(async (req, res) => {
       let logTail = "";
       try { logTail = fs.readFileSync(path.join(outDir, "render.log"), "utf8").split("\n").slice(-4).join("\n").slice(-800); } catch {}
       json(res, 200, { ok: true, running, progress, hasFile, size, logTail });
+      return;
+    }
+
+    if (req.method === "GET" && p === "/render/stream") {
+      const outDir = renderDir(u.searchParams);
+      const file = path.join(outDir, "output.mp4");
+      if (!fs.existsSync(file)) { json(res, 404, { ok: false, error: "not rendered yet" }); return; }
+      const size = fs.statSync(file).size;
+      const range = req.headers.range;
+      if (range) {
+        const m = range.match(/bytes=(\d*)-(\d*)/);
+        let start = m && m[1] ? parseInt(m[1], 10) : 0;
+        let end = m && m[2] ? parseInt(m[2], 10) : size - 1;
+        if (start >= size) { res.writeHead(416, Object.assign({ "Content-Range": "bytes */" + size }, CORS)); res.end(); return; }
+        end = Math.min(end, size - 1);
+        res.writeHead(206, Object.assign({
+          "Content-Type": "video/mp4",
+          "Content-Length": end - start + 1,
+          "Content-Range": "bytes " + start + "-" + end + "/" + size,
+          "Accept-Ranges": "bytes",
+          "Content-Disposition": "inline",
+        }, CORS));
+        fs.createReadStream(file, { start, end }).pipe(res);
+      } else {
+        res.writeHead(200, Object.assign({
+          "Content-Type": "video/mp4",
+          "Content-Length": size,
+          "Accept-Ranges": "bytes",
+          "Content-Disposition": "inline",
+        }, CORS));
+        fs.createReadStream(file).pipe(res);
+      }
       return;
     }
 

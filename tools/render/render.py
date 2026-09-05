@@ -178,6 +178,7 @@ def main():
             prog("render", 0.05 + 0.75 * i / len(vclips), "映像 %d/%d" % (i + 1, len(vclips)))
             seg = os.path.join(work, "seg%03d.mp4" % i)
             if not (os.path.isfile(seg) and os.path.getsize(seg) > 0):
+                tmp = seg + ".tmp.mp4"
                 dur = e["out"] - e["in"]
                 run([ff, "-hide_banner", "-y",
                      "-ss", "%.3f" % e["in"], "-t", "%.3f" % dur, "-i", e["path"],
@@ -186,7 +187,8 @@ def main():
                             "pad=%d:%d:(ow-iw)/2:(oh-ih)/2,fps=%d" % (width, height, width, height, fps),
                      "-c:v", "libx264", "-preset", "veryfast", "-crf", "19", "-pix_fmt", "yuv420p",
                      "-c:a", "aac", "-b:a", "192k", "-ar", "44100", "-ac", "2",
-                     "-t", "%.3f" % (e["tlend"] - e["tl"]), seg])
+                     "-t", "%.3f" % (e["tlend"] - e["tl"]), tmp])
+                os.replace(tmp, seg)  # atomic: partial segments are never reused on resume
             lf.write("file '%s'\n" % seg)
 
     # 2) concat video

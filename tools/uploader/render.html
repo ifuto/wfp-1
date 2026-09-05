@@ -76,7 +76,8 @@
     <div class="status" id="prog"></div>
     <div class="log hidden" id="log"></div>
     <div style="margin-top:12px" class="hidden" id="dlWrap">
-      <a class="btn" id="dlLink" href="#"><button class="green big">⬇️ MP4をダウンロード</button></a>
+      <video id="player" controls playsinline preload="metadata" style="width:100%;border-radius:10px;background:#000"></video>
+      <div style="margin-top:10px"><a class="btn" id="dlLink" href="#"><button class="green big">⬇️ MP4をダウンロード</button></a></div>
       <div class="status" style="margin-top:6px" id="fileMeta"></div>
     </div>
     <div class="status" style="margin-top:10px">4K120の書き出しは数十分かかることがあります。ページを閉じても処理は続きます（このページを開き直せば進捗が見られます）。</div>
@@ -173,6 +174,10 @@
           barFill.style.width = "100%";
           prog.innerHTML = "✅ 書き出し完了！";
           dlWrap.classList.remove("hidden");
+          const player = document.getElementById("player");
+          const src = "/render/stream" + qs();
+          if (player.src.indexOf(src) === -1) player.src = src; // keep playback position on polls
+          player.load();
           dlLink.href = "/render/file" + qs();
           fileMeta.textContent = fmt(j.size) + " ・ " + sel.w + "×" + sel.h + "@" + sel.fps + "fps";
           logBox.textContent = j.logTail || "";
