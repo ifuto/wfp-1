@@ -282,13 +282,28 @@
     canShareFiles = typeof navigator.share === "function" && !!navigator.canShare && navigator.canShare({ files: [probe] });
   } catch (e) { canShareFiles = false; }
 
-  if (isIOS) {
+  if (isIOS && inAppBrowser) {
+    // アプリ内ブラウザ（Googleアプリなど）では input type=file が動かないことがある
+    iosBanner.classList.remove("hidden");
+    iosBanner.style.background = "#2a1a1a";
+    iosBanner.style.borderColor = "#5a2a2a";
+    iosBanner.style.color = "#ffb0b0";
+    iosBanner.innerHTML =
+      "🚫 <b>今、アプリ内ブラウザ（Googleアプリなど）で開いています。</b>" +
+      "<br>この種のブラウザでは<b>ファイル選択画面やダウンロードが動かない</b>ことがあります（ブラウザ側の仕様で、ページからは直せません）。以下のURLをコピーして <b>Safari</b> か <b>Chrome</b> で開き直してください。" +
+      '<br><button class="ghost" id="copyUrlBtn" style="margin-top:8px;padding:8px 14px;font-size:13px;min-height:0">このURLをコピー</button>';
+    const cb = document.getElementById("copyUrlBtn");
+    if (cb) cb.addEventListener("click", () => {
+      if (navigator.clipboard) navigator.clipboard.writeText(location.href).then(() => (cb.textContent = "コピーしました！"));
+      else prompt("このURLをコピーしてSafariで開いてください:", location.href);
+    });
+  } else if (isIOS) {
     iosBanner.classList.remove("hidden");
     iosBanner.innerHTML =
       "📱 <b>iOS を検出</b>" +
       "<br>・保存方法: 共有シート → <b>「“ファイル”に保存」</b>" +
       (canShareFiles ? "（共有API 利用可能 ✅）" : "（⚠️ このブラウザでは共有APIが使えません。Safariで開くと確実です）") +
-      "<br>・環境: " + (inAppBrowser ? "アプリ内ブラウザ（Googleアプリなど）" : "Safari");
+      "<br>・環境: Safari";
   }
 
   // ---- ファイル選択（タップは input が直接受けるので JS の click() 不要） ----

@@ -1,0 +1,291 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0f1117">
+<title>ダイレクトアップロード（分割不要）</title>
+<style>
+  :root { --bg:#0f1117; --card:#181b24; --border:#2a2f3d; --text:#e8eaf0; --sub:#9aa1b5; --accent:#4f8cff; --accent2:#3ddc97; --warn:#ffb84d; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font-family:system-ui,-apple-system,"Segoe UI",Meiryo,sans-serif; line-height:1.6; -webkit-text-size-adjust:100%; }
+  .wrap { max-width:680px; margin:0 auto; padding:20px 14px 80px; }
+  h1 { font-size:20px; margin:8px 0 4px; }
+  .sub { color:var(--sub); font-size:13px; margin:0 0 16px; }
+  .card { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:18px; margin-bottom:14px; }
+  .card h2 { font-size:15px; margin:0 0 10px; color:var(--accent2); }
+  .banner { border-radius:10px; padding:12px; font-size:13px; margin-bottom:14px; }
+  .banner.gsa { background:#2a1a1a; border:1px solid #5a2a2a; color:#ffb0b0; }
+  .banner.ok { background:#14231c; border:1px solid #245540; color:#a9e8cf; }
+  button { background:var(--accent); color:#fff; border:none; border-radius:10px; padding:14px 20px; font-size:16px; font-weight:700; cursor:pointer; min-height:48px; }
+  button.green { background:var(--accent2); color:#08281a; }
+  button.ghost { background:transparent; border:1px solid var(--border); color:var(--text); font-weight:500; }
+  button.big { width:100%; padding:18px; font-size:17px; }
+  button:disabled { opacity:.4; cursor:not-allowed; }
+  .filebtn { position:relative; display:block; border:2px dashed var(--border); border-radius:12px; padding:34px 14px; text-align:center; color:var(--sub); cursor:pointer; overflow:hidden; }
+  .filebtn.has { border-style:solid; border-color:var(--accent2); }
+  .filebtn input { position:absolute; inset:0; width:100%; height:100%; opacity:0; cursor:pointer; }
+  .filebtn .name { color:var(--text); font-weight:700; word-break:break-all; }
+  .bar { height:14px; background:#10131b; border-radius:8px; overflow:hidden; margin:10px 0 6px; }
+  .bar > div { height:100%; width:0; background:linear-gradient(90deg,var(--accent),var(--accent2)); transition:width .2s; }
+  .status { font-size:13px; color:var(--sub); }
+  .status b { color:var(--text); }
+  .row { display:flex; gap:10px; flex-wrap:wrap; margin-top:12px; }
+  code { background:#10131b; border:1px solid var(--border); border-radius:6px; padding:2px 6px; font-family:ui-monospace,monospace; font-size:12px; }
+  .hidden { display:none; }
+  .err { background:#2a1a1a; border:1px solid #5a2a2a; color:#ffb0b0; border-radius:8px; padding:10px; font-size:13px; margin-top:10px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>📤 ダイレクトアップロード</h1>
+  <p class="sub">zipをそのまま選ぶだけでOK（分割不要・チャットの25MB制限も関係なし）。転送はこのサーバーに直接行われます。</p>
+
+  <div id="envBanner" class="banner gsa hidden"></div>
+
+  <div class="card" id="pickCard">
+    <h2>① ファイルを選択</h2>
+    <label class="filebtn" id="filebtn">
+      <span id="filebtnText">ここをタップして .zip を選択</span>
+      <input type="file" id="file">
+    </label>
+    <div class="row">
+      <label style="font-size:12px;color:var(--sub)">チャンクサイズ
+        <select id="chunkSel" style="font-size:16px;background:#10131b;color:var(--text);border:1px solid var(--border);border-radius:8px;padding:8px;">
+          <option value="8388608" selected>8 MB</option>
+          <option value="4194304">4 MB</option>
+          <option value="2097152">2 MB</option>
+        </select>
+      </label>
+    </div>
+  </div>
+
+  <div class="card hidden" id="resumeCard">
+    <h2>⏯ 中断された転送があります</h2>
+    <div class="status" id="resumeInfo"></div>
+    <div class="row">
+      <button class="green" id="resumeBtn">続きから再開</button>
+      <button class="ghost" id="restartBtn">最初からやり直す</button>
+    </div>
+  </div>
+
+  <div class="card hidden" id="upCard">
+    <h2>② 転送</h2>
+    <div class="status" id="fileInfo"></div>
+    <div class="bar"><div id="bar"></div></div>
+    <div class="status" id="prog">待機中…</div>
+    <div class="row">
+      <button class="green big" id="startBtn">転送開始</button>
+    </div>
+    <div class="status" style="margin-top:8px">⚠️ 転送中はこのタブを開いたままにしてください（Wi-Fi推奨）。止まっても、このページを開き直せば続きから再開できます。</div>
+    <div class="err hidden" id="errBox"></div>
+  </div>
+
+  <div class="card hidden" id="doneCard">
+    <h2>✅ 完了</h2>
+    <div class="status" id="doneInfo"></div>
+    <div class="row">
+      <a id="dlLink" href="/download" style="text-decoration:none"><button class="green">.wfpbundle をダウンロード</button></a>
+    </div>
+    <div class="status" style="margin-top:8px">サーバー側でも検証・結合済み。このあとエージェントが .wfpbundle を確認します。</div>
+  </div>
+</div>
+
+<script>
+(function () {
+  "use strict";
+  const fileInput = document.getElementById("file");
+  const filebtn = document.getElementById("filebtn");
+  const filebtnText = document.getElementById("filebtnText");
+  const chunkSel = document.getElementById("chunkSel");
+  const pickCard = document.getElementById("pickCard");
+  const resumeCard = document.getElementById("resumeCard");
+  const resumeInfo = document.getElementById("resumeInfo");
+  const resumeBtn = document.getElementById("resumeBtn");
+  const restartBtn = document.getElementById("restartBtn");
+  const upCard = document.getElementById("upCard");
+  const fileInfo = document.getElementById("fileInfo");
+  const bar = document.getElementById("bar");
+  const prog = document.getElementById("prog");
+  const startBtn = document.getElementById("startBtn");
+  const errBox = document.getElementById("errBox");
+  const doneCard = document.getElementById("doneCard");
+  const doneInfo = document.getElementById("doneInfo");
+  const envBanner = document.getElementById("envBanner");
+
+  let file = null;
+  let chunkSize = parseInt(chunkSel.value, 10);
+  let uploading = false;
+
+  const ua = navigator.userAgent || "";
+  const isIOS = /iPad|iPhone|iPod/.test(ua) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  const isGSA = /GSA|GoogleApp|Google\b/.test(ua) && isIOS && !/Safari\/[\d.]+$/.test(ua.replace(/CriOS|FxiOS|EdgiOS|OPiOS/g, ""));
+  const looksInApp = isIOS && !(/Safari\/[\d.]+/.test(ua) || /CriOS|FxiOS|EdgiOS|OPiOS/.test(ua));
+  if (looksInApp) {
+    envBanner.classList.remove("hidden");
+    envBanner.innerHTML = "⚠️ <b>アプリ内ブラウザで開いている可能性が高いです。</b>ファイル選択ができない場合は、このURLをコピーして <b>Safari</b> または <b>Chrome</b> で開き直してください。"
+      + '<br><button class="ghost" id="copyUrl" style="margin-top:8px;padding:8px 14px;font-size:13px;min-height:0">このURLをコピー</button>';
+    const cb = document.getElementById("copyUrl");
+    if (cb) cb.addEventListener("click", () => {
+      const t = location.href;
+      if (navigator.clipboard) navigator.clipboard.writeText(t).then(() => (cb.textContent = "コピーしました！"));
+      else { prompt("このURLをコピーしてSafariで開いてください:", t); }
+    });
+  }
+
+  function fmt(n) {
+    if (n >= 1073741824) return (n / 1073741824).toFixed(2) + " GB";
+    if (n >= 1048576) return (n / 1048576).toFixed(1) + " MB";
+    return (n / 1024).toFixed(0) + " KB";
+  }
+  function esc(s) { return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
+  function showErr(msg) { errBox.classList.remove("hidden"); errBox.textContent = "⚠️ " + msg + " — 「転送開始」をもう一度押すと失敗した場所から再開できます。"; }
+
+  async function sha256(buf) {
+    if (!(window.crypto && crypto.subtle)) return null;
+    const d = await crypto.subtle.digest("SHA-256", buf);
+    const a = new Uint8Array(d);
+    let h = "";
+    for (let i = 0; i < a.length; i++) h += a[i].toString(16).padStart(2, "0");
+    return h;
+  }
+
+  chunkSel.addEventListener("change", () => { chunkSize = parseInt(chunkSel.value, 10); });
+
+  fileInput.addEventListener("change", function () {
+    if (this.files && this.files.length) {
+      file = this.files[0];
+      filebtn.classList.add("has");
+      const total = Math.ceil(file.size / chunkSize);
+      filebtnText.innerHTML = '<span class="name">📄 ' + esc(file.name) + "</span><br>" + fmt(file.size) + " ・ " + total + " チャンク（再選択はここをタップ）";
+      upCard.classList.remove("hidden");
+      doneCard.classList.add("hidden");
+      fileInfo.innerHTML = "ファイル: <b>" + esc(file.name) + "</b>（" + fmt(file.size) + "）";
+      prog.textContent = "待機中…「転送開始」をタップ";
+      bar.style.width = "0%";
+    }
+    this.value = "";
+  });
+
+  async function api(path, opts) {
+    const r = await fetch(path, opts);
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw Object.assign(new Error(j.error || ("HTTP " + r.status)), { data: j, status: r.status });
+    return j;
+  }
+
+  /* ---- resume detection ---- */
+  (async function checkResume() {
+    try {
+      const j = await api("/status");
+      if (j.session && j.session.totalChunks > 0 && j.session.received.length < j.session.totalChunks) {
+        const s = j.session;
+        const gotBytes = s.received.length * s.chunkSize;
+        resumeInfo.innerHTML = "<b>" + esc(s.name) + "</b>（" + fmt(s.size) + "）<br>" + (s.received.length) + " / " + s.totalChunks + " チャンク受信済み（約" + fmt(Math.min(gotBytes, s.size)) + "）";
+        resumeCard.classList.remove("hidden");
+        resumeBtn.addEventListener("click", () => {
+          resumeCard.classList.add("hidden");
+          // 受信済みファイル情報を手元に再現できないので、同じファイルを選んでもらう
+          alert("同じファイル（" + s.name + "）をもう一度選んでください。受信済みのチャンクはスキップされます。");
+          chunkSel.value = String(s.chunkSize);
+          chunkSize = s.chunkSize;
+          pickCard.scrollIntoView({ behavior: "smooth" });
+        });
+        restartBtn.addEventListener("click", async () => {
+          await api("/reset", { method: "POST" });
+          resumeCard.classList.add("hidden");
+        });
+      }
+    } catch {}
+  })();
+
+  /* ---- upload ---- */
+  startBtn.addEventListener("click", async () => {
+    if (!file || uploading) return;
+    uploading = true;
+    startBtn.disabled = true;
+    errBox.classList.add("hidden");
+
+    const total = Math.ceil(file.size / chunkSize);
+    let missing = new Set();
+    try {
+      try {
+        await api("/init", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: file.name, size: file.size, chunkSize, totalChunks: total }),
+        });
+      } catch (e) {
+        if (e.status === 409) {
+          await api("/init", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ name: file.name, size: file.size, chunkSize, totalChunks: total, force: true }),
+          });
+        } else throw e;
+      }
+      const st = await api("/status");
+      if (st.session) {
+        const have = new Set(st.session.received || []);
+        for (let i = 0; i < total; i++) if (!have.has(i)) missing.add(i);
+      } else {
+        for (let i = 0; i < total; i++) missing.add(i);
+      }
+    } catch (e) { uploading = false; startBtn.disabled = false; showErr("初期化失敗: " + e.message); return; }
+
+    const t0 = Date.now();
+    let sentBytes = 0;
+    const list = Array.from(missing).sort((a, b) => a - b);
+    const baseBytes = file.size - list.length * chunkSize;
+
+    for (let n = 0; n < list.length; n++) {
+      const i = list[n];
+      const start = i * chunkSize;
+      const end = Math.min(file.size, start + chunkSize);
+      const blob = file.slice(start, end);
+      const sha = await sha256(await blob.arrayBuffer());
+      let ok = false, lastErr = null;
+      for (let attempt = 0; attempt < 3 && !ok; attempt++) {
+        try {
+          const url = "/chunk/" + i + (sha ? "?sha=" + sha : "");
+          const r = await fetch(url, { method: "POST", headers: { "Content-Type": "application/octet-stream" }, body: blob });
+          const j = await r.json().catch(() => ({}));
+          if (!r.ok) throw new Error(j.error || "HTTP " + r.status);
+          ok = true;
+        } catch (e) { lastErr = e; await new Promise((r2) => setTimeout(r2, 1000 * (attempt + 1))); }
+      }
+      if (!ok) { uploading = false; startBtn.disabled = false; showErr("チャンク " + (i + 1) + " の送信に失敗: " + (lastErr && lastErr.message)); return; }
+      sentBytes += blob.size;
+      const doneBytes = Math.min(file.size, baseBytes + sentBytes);
+      const pct = (doneBytes / file.size * 100);
+      bar.style.width = pct.toFixed(1) + "%";
+      const sec = (Date.now() - t0) / 1000;
+      const speed = sec > 0 ? sentBytes / sec : 0;
+      const eta = speed > 0 ? (file.size - doneBytes) / speed : 0;
+      prog.innerHTML = chunkLabel(i, total) + " ・ <b>" + pct.toFixed(1) + "%</b> ・ " + fmt(speed) + "/s ・ 残り約" + (eta > 90 ? Math.ceil(eta / 60) + "分" : Math.ceil(eta) + "秒");
+    }
+
+    prog.textContent = "サーバー側で結合・検証中…（しばらくお待ちください）";
+    try {
+      const fin = await api("/finish", { method: "POST" });
+      const zip = fin.zipCheck;
+      doneInfo.innerHTML =
+        "📦 <b>" + esc(fin.originalName) + "</b>（" + fmt(fin.size) + "）を受信・結合しました。" +
+        (zip ? (zip.ok ? "<br>✅ zip整合性チェック (unzip -t) 合格" : "<br>⚠️ zip整合性チェック不合格: " + esc(zip.detail || "")) : "") +
+        "<br>🔤 .wfpbundle 変換済み: <b>" + esc(fin.bundleName) + "</b>";
+      doneCard.classList.remove("hidden");
+      doneCard.scrollIntoView({ behavior: "smooth" });
+      prog.textContent = "完了 ✔（エージェント側でも確認します）";
+    } catch (e) {
+      showErr("結合・検証でエラー: " + e.message);
+      prog.textContent = "エラー";
+    }
+    uploading = false;
+    startBtn.disabled = false;
+  });
+
+  function chunkLabel(i, total) { return "チャンク " + (i + 1) + " / " + total; }
+})();
+</script>
+</body>
+</html>
