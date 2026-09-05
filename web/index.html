@@ -88,6 +88,12 @@
   </div>
 
   <div class="card">
+    <h2>🔍 動作診断（エラーが出たら押して結果をコピペしてね）</h2>
+    <button class="ghost" id="diagBtn">環境チェックを実行</button>
+    <pre class="log hidden" id="diagOut"></pre>
+  </div>
+
+  <div class="card">
     <h2>ℹ️ 仕組み</h2>
     <div class="status">
       アップロードした .wfpbundle をブラウザ内でzip展開 → <code>timeline.wesproj</code> のカット情報を解析 →
@@ -107,6 +113,8 @@
   "use strict";
   const $ = (id) => document.getElementById(id);
   const Z = ZipLite, WM = WfpMP4;
+  const isMobile = /Android|iPhone|iPad|iPod|Mobi/i.test(navigator.userAgent || "") ||
+    (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
 
   let src = null, entries = null, wsrc = null, wentries = null;
   let pinfo = null, mediaMap = null, parsed = null;
@@ -175,6 +183,48 @@
     sel = { w: +el.dataset.w, h: +el.dataset.h, fps: +el.dataset.fps };
   });
 
+  /* ---------- スマホ調整 ---------- */
+  if (isMobile) {
+    fileInput.removeAttribute("accept");
+    document.querySelectorAll(".preset").forEach((x) => x.classList.remove("sel"));
+    const p720 = document.querySelector('.preset[data-w="1280"]');
+    if (p720) p720.classList.add("sel");
+    sel = { w: 1280, h: 720, fps: 60 };
+    const note = document.createElement("div");
+    note.className = "warn";
+    note.innerHTML = "📱 <b>スマホを検出</b> — 既定を 720p60 にしました（メモリと熱の関係）。1080p以上はPC版 Chrome/Edge か exe版を推奨。スマホのブラウザは <b>AV1（Medalクリップ）のデコードに非対応</b>の場合があります（エラーが出たら下の「動作診断」で確認してください）";
+    setCard.appendChild(note);
+  }
+
+  /* ---------- 診断 ---------- */
+  $("diagBtn").addEventListener("click", async () => {
+    const out = $("diagOut");
+    out.classList.remove("hidden");
+    const L = [];
+    L.push("UA: " + (navigator.userAgent || "?"));
+    L.push("platform: " + navigator.platform + " / モバイル判定: " + isMobile);
+    L.push("WebCodecs: " + (typeof VideoDecoder !== "undefined" ? "あり" : "なし ← PC版 Chrome/Edge か Safari 17+ が必要"));
+    if (typeof VideoDecoder !== "undefined") {
+      for (const c of ["avc1.4d402a", "av01.0.08M.08", "hvc1.1.6.L123.00", "vp09.00.10.08"]) {
+        try {
+          const s = await VideoDecoder.isConfigSupported({ codec: c });
+          L.push("  デコード " + c + ": " + (s.supported ? "OK" : "NG"));
+        } catch (e) { L.push("  デコード " + c + ": エラー(" + (e.message || e) + ")"); }
+      }
+    }
+    if (typeof VideoEncoder !== "undefined") {
+      const pats = [[1280, 720, 60], [1920, 1080, 60], [1920, 1080, 120], [3840, 2160, 120]];
+      for (const pt of pats) {
+        const cfg = await pickEncoderConfig(pt[0], pt[1], pt[2]);
+        L.push("  エンコード " + pt[0] + "x" + pt[1] + "@" + pt[2] + ": " + (cfg ? "OK " + cfg.codec : "NG"));
+      }
+    }
+    L.push("OffscreenCanvas: " + (typeof OffscreenCanvas !== "undefined" ? "OK" : "NG(canvas要素で代替)"));
+    L.push("AudioEncoder(Opus): " + (typeof AudioEncoder !== "undefined" ? "OK" : "NG(音声なしで書き出し)"));
+    L.push("CPU数: " + (navigator.hardwareConcurrency || "?") + " / メモリ: " + (navigator.deviceMemory ? navigator.deviceMemory + "GB" : "?"));
+    out.textContent = L.join("\n");
+  });
+
   async function mediaBlobFor(guid) {
     const m = mediaMap.get(guid);
     if (!m) return null;
@@ -224,8 +274,19 @@
     const baseUs = Math.round(clip.tl * 1e6);
 
     const cfg = { codec: vt.codec, codedWidth: vt.width, codedHeight: vt.height, description: vt.description };
-    const sup = await VideoDecoder.isConfigSupported(cfg);
-    if (!sup.supported) throw new Error("このブラウザは " + vt.codec + "（クリップ: " + clip.mediaName + "）のデコードに非対応です。Chrome / Edge でお試しください");
+    // 環境によって hardware / software デコーダーの当たり外れがあるので両方試す
+    const tries = [cfg, Object.assign({}, cfg, { hardwareAcceleration: "prefer-software" })];
+    let okCfg = null, lastWhy = "";
+    for (const c of tries) {
+      try {
+        const sup = await VideoDecoder.isConfigSupported(c);
+        if (sup && sup.supported) { okCfg = c; break; }
+        lastWhy = "非対応";
+      } catch (e) { lastWhy = e.message || String(e); }
+    }
+    if (!okCfg) {
+      throw new Error("このブラウザは " + vt.codec + "（クリップ: " + clip.mediaName + "）のデコードに非対応です（" + lastWhy + "）。PC版 Chrome / Edge 、または exe版でお試しください");
+    }
 
     // letterbox geometry
     const sw = vt.width || ctx.canvas.width, sh = vt.height || ctx.canvas.height;
@@ -264,9 +325,15 @@
           f.close();
         } catch (e) { err = e; f.close(); }
       },
-      error: (e) => { err = e; },
+      error: (e) => { if (!err) err = e; },
     });
-    decoder.configure(cfg);
+    try {
+      decoder.configure(okCfg);
+      if (decoder.state !== "configured") throw new Error("decoder state: " + decoder.state);
+    } catch (e) {
+      try { decoder.close(); } catch (e2) {}
+      throw new Error("デコーダー初期化失敗（" + vt.codec + " / " + clip.mediaName + "）: " + (e.message || e));
+    }
 
     // start feeding from the last keyframe at/before the in-point
     let start = 0;
@@ -280,12 +347,17 @@
       const u = usOf(s);
       if (u > outUs) break;
       while (decoder.decodeQueueSize > 60) await sleep(0);
-      decoder.decode(new EncodedVideoChunk({
-        type: s.is_sync ? "key" : "delta",
-        timestamp: u,
-        duration: Math.round((s.duration / ts) * 1e6) || tickUs,
-        data: s.data,
-      }));
+      try {
+        decoder.decode(new EncodedVideoChunk({
+          type: s.is_sync ? "key" : "delta",
+          timestamp: u,
+          duration: Math.round((s.duration / ts) * 1e6) || tickUs,
+          data: s.data,
+        }));
+      } catch (e) {
+        if (!err) err = new Error("デコード失敗（" + vt.codec + " / " + clip.mediaName + "）: " + (e.message || e));
+        break;
+      }
       fed++;
     }
     if (!err) await decoder.flush();
@@ -361,12 +433,27 @@
     });
   }
 
-  /* ---------- encoder choice ---------- */
-  function videoEncoderConfig(w, h, fps) {
+  /* ---------- encoder choice（環境差を吸収するフォールバック付き） ---------- */
+  function videoEncoderConfigs(w, h, fps) {
     const big = w * h > 1920 * 1080;
-    const codec = big ? (fps > 60 ? "avc1.640034" : "avc1.640033") : (fps > 60 ? "avc1.4d4033" : "avc1.4d402a");
-    const bitrate = big ? (fps > 60 ? 90e6 : 55e6) : (w >= 1920 ? (fps > 60 ? 20e6 : 12e6) : 8e6);
-    return { codec, width: w, height: h, bitrate, framerate: fps, latencyMode: "quality", avc: { format: "avc" } };
+    const list = [];
+    const push = (o) => list.push(Object.assign({ width: w, height: h, framerate: fps, avc: { format: "avc" } }, o));
+    if (big) push({ codec: fps > 60 ? "avc1.640034" : "avc1.640033", bitrate: fps > 60 ? 90e6 : 55e6, latencyMode: "quality" });
+    else if (w >= 1920) push({ codec: fps > 60 ? "avc1.4d4033" : "avc1.4d402a", bitrate: fps > 60 ? 20e6 : 12e6, latencyMode: "quality" });
+    else push({ codec: "avc1.42E01f", bitrate: 8e6, latencyMode: "quality" });
+    list.slice().reverse().forEach((c) => list.push(Object.assign({}, c, { latencyMode: "realtime" })));
+    list.push({ codec: "avc1.42E01f", width: w, height: h, framerate: Math.min(fps, 60), bitrate: 6e6 });
+    return list.filter((c, i, a) => a.findIndex((x) => JSON.stringify(x) === JSON.stringify(c)) === i);
+  }
+
+  async function pickEncoderConfig(w, h, fps) {
+    for (const c of videoEncoderConfigs(w, h, fps)) {
+      try {
+        const sup = await VideoEncoder.isConfigSupported(c);
+        if (sup && sup.supported) return c;
+      } catch (e) {}
+    }
+    return null;
   }
 
   /* ---------- main ---------- */
@@ -386,9 +473,8 @@
     result.classList.add("hidden");
 
     const { w, h, fps } = sel;
-    const encCfg = videoEncoderConfig(w, h, fps);
-    const sup = await VideoEncoder.isConfigSupported(encCfg);
-    if (!sup.supported) throw new Error("H.264エンコード設定が非対応です (" + encCfg.codec + ")。解像度/fpsを下げてみてください");
+    const encCfg = await pickEncoderConfig(w, h, fps);
+    if (!encCfg) throw new Error("このブラウザはH.264エンコード（" + w + "x" + h + "@" + fps + "）に非対応です。解像度/fpsを下げてみてください");
 
     let audioOK = false;
     if (typeof AudioEncoder !== "undefined") {
@@ -407,7 +493,9 @@
       setProg(0.02 + 0.08 * (++i / guids.size), "素材を展開中… " + i + "/" + guids.size);
     }
 
-    const canvas = new OffscreenCanvas(w, h);
+    const canvas = typeof OffscreenCanvas !== "undefined"
+      ? new OffscreenCanvas(w, h)
+      : (() => { const c = document.createElement("canvas"); c.width = w; c.height = h; return c; })();
     const ctx = canvas.getContext("2d");
     ctx.fillStyle = "#000"; ctx.fillRect(0, 0, w, h);
 
