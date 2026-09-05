@@ -43,7 +43,7 @@
 </head>
 <body>
 <div class="wrap">
-  <h1>🎬 wfp render（Web版 — 完全ローカル処理）<span style="font-size:11px;color:#5a6275;font-weight:400"> build v9</span></h1>
+  <h1>🎬 wfp render（Web版 — 完全ローカル処理）<span style="font-size:11px;color:#5a6275;font-weight:400"> build v10</span></h1>
   <p class="sub">Filmora の .wfpbundle をアップロードするだけで、ブラウザ内でレンダリングして MP4 を書き出します。<br>処理はすべてこのブラウザ内で完結（WebCodecs使用・AV1対応・ffmpeg 32MB読み込み不要）。<br>💙 4Kが重い人は <a href="https://github.com/ifuto/wfp-1/raw/arena/01a07073-wfp-1/dist/wfp-render.exe">exe版</a> もあり。</p>
 
   <div class="card">
@@ -67,6 +67,16 @@
       <div class="preset sel" data-w="1920" data-h="1080" data-fps="60"><div class="res">1080p</div><div class="fps">60fps</div><div class="note">推奨</div></div>
       <div class="preset" data-w="1920" data-h="1080" data-fps="120"><div class="res">1080p</div><div class="fps">120fps</div><div class="note"></div></div>
       <div class="preset" data-w="3840" data-h="2160" data-fps="120"><div class="res">4K</div><div class="fps">120fps</div><div class="note">GPU次第</div></div>
+    </div>
+    <div class="warn" id="helperBox">
+      🛟 <b>補助サーバー（任意・AV1が再生できない端末向け）</b><br>
+      Render Studio のURL（例: <code>https://3000-xxxx.e2b.app</code>）を入れると、
+      端末で再生できないクリップ（AV1）だけサーバーがH.264に変換してくれるモードになります。
+      <div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap">
+        <input id="helperUrl" placeholder="https://3000-xxxx.e2b.app" style="flex:1;min-width:200px;background:#10131b;color:var(--text);border:1px solid var(--border);border-radius:8px;padding:8px 10px;font-size:14px">
+        <button class="ghost" id="helperSave" style="min-height:0;padding:8px 14px;font-size:13px">保存</button>
+      </div>
+      <div id="helperStat" style="margin-top:4px"></div>
     </div>
     <div class="warn">
       ✅ 対応: カット編集（トリミング・並び）＋音声ミックス（BGM＋クリップ音声）。<br>
@@ -231,6 +241,18 @@
     note.innerHTML = "📱 <b>スマホを検出</b> — 既定を 720p60 にしました（メモリと熱の関係）。1080p以上はPC版 Chrome/Edge か exe版を推奨。スマホのブラウザは <b>AV1（Medalクリップ）のデコードに非対応</b>の場合があります（エラーが出たら下の「動作診断」で確認してください）";
     setCard.appendChild(note);
   }
+
+  /* ---------- 補助サーバー設定 ---------- */
+  (function initHelper() {
+    const inp = $("helperUrl"), btn = $("helperSave"), stat = $("helperStat");
+    inp.value = localStorage.getItem("wfpHelperUrl") || "";
+    stat.textContent = inp.value ? "✅ 設定済み: " + inp.value : "未設定";
+    btn.addEventListener("click", () => {
+      let v = inp.value.trim().replace(/\/+$/, "");
+      localStorage.setItem("wfpHelperUrl", v);
+      stat.textContent = v ? "✅ 保存しました: " + v : "未設定（クリア）";
+    });
+  })();
 
   /* ---------- 診断 ---------- */
   $("diagBtn").addEventListener("click", async () => {
@@ -484,167 +506,186 @@
   }
 
   /* ---------- 互換モード: <video>要素を再生してキャプチャ（WebCodecsが使えない場合） ---------- */
+  function helperBase() {
+    return (localStorage.getItem("wfpHelperUrl") || "").replace(/\/+$/, "");
+  }
+
   async function renderClipViaVideoElement(clip, mediaBlob, ctx, encoder, opts, progressCb) {
     phase("互換モード開始: " + clip.mediaName.slice(0, 36));
-    const url = URL.createObjectURL(mediaBlob);
-    const v = document.createElement("video");
-    v.muted = true;
-    v.playsInline = true;
-    v.preload = "auto";
-    // iOSは「見えないvideo」のデコードをサボる/止めることがあるため、
-    // 処理中クリップを小さくプレビューとして見える位置に出す
-    v.style.cssText = "width:132px;height:auto;border-radius:8px;display:block;margin:4px auto;background:#000;";
-    v.setAttribute("aria-hidden", "true");
-    const anchor = $("renderCard");
-    anchor.insertBefore(v, anchor.firstChild);
-    v.src = url;
-    try {
-      await withTimeout(new Promise((res, rej) => {
-        if (v.readyState >= 1) return res();
-        const t = setTimeout(() => rej(new Error("動画の読み込みタイムアウト")), 20000);
-        v.addEventListener("loadedmetadata", () => { clearTimeout(t); res(); }, { once: true });
-        v.addEventListener("error", () => {
-          clearTimeout(t);
-          rej(new Error("この端末ではこの素材を再生できません（コーデック非対応の可能性）→ PC版 Chrome/Edge または exe版をご利用ください"));
-        }, { once: true });
-      }), 25000, "動画の読み込みタイムアウト");
-      phase("読込OK (" + (v.videoWidth || "?") + "x" + (v.videoHeight || "?") + ") 再生可能時間 " + v.duration.toFixed(1) + "s");
+    const sw0 = 0;
+    const state = { nTicks: 0 };
 
-      const sw = v.videoWidth || 1280, sh = v.videoHeight || 720;
-      const scale = Math.min(opts.w / sw, opts.h / sh);
-      const dw = Math.max(2, Math.round(sw * scale / 2) * 2), dh = Math.max(2, Math.round(sh * scale / 2) * 2);
-      const dx = (opts.w - dw) / 2, dy = (opts.h - dh) / 2;
-      const draw = () => {
-        ctx.fillStyle = "#000";
-        ctx.fillRect(0, 0, opts.w, opts.h);
-        try { ctx.drawImage(v, dx, dy, dw, dh); } catch (e) {}
-      };
-      const tick = 1 / opts.fps;
-      const clipDur = clip.out - clip.in;
-      const baseUs = Math.round(clip.tl * 1e6);
-      const tickUs = Math.round(1e6 / opts.fps);
-      let nTicks = 0;
-      const totalTicks = Math.max(1, Math.round(clipDur / tick));
-      const emitTick = () => {
-        const vf = new VideoFrame(ctx.canvas, { timestamp: baseUs + nTicks * tickUs, duration: tickUs });
-        encoder.encode(vf, { keyFrame: nTicks === 0 });
-        vf.close();
-        nTicks++;
-      };
+    const attempt = async (blob, label) => {
+      phase("ソース: " + label);
+      const url = URL.createObjectURL(blob);
+      const v = document.createElement("video");
+      v.muted = true;
+      v.playsInline = true;
+      v.preload = "auto";
+      v.style.cssText = "width:132px;height:auto;border-radius:8px;display:block;margin:4px auto;background:#000;";
+      const anchor = $("renderCard");
+      anchor.insertBefore(v, anchor.firstChild);
+      v.src = url;
+      try {
+        await withTimeout(new Promise((res, rej) => {
+          if (v.readyState >= 1) return res();
+          const t = setTimeout(() => rej(new Error("動画の読み込みタイムアウト")), 20000);
+          v.addEventListener("loadedmetadata", () => { clearTimeout(t); res(); }, { once: true });
+          v.addEventListener("error", () => { clearTimeout(t); rej(new Error("読込エラー（コーデック非対応の可能性）")); }, { once: true });
+        }), 25000, "動画の読み込みタイムアウト");
+        phase("読込OK (" + (v.videoWidth || "?") + "x" + (v.videoHeight || "?") + ") " + v.duration.toFixed(1) + "s");
 
-      // in点へシーク
-      v.currentTime = Math.min(clip.in, Math.max(0, v.duration - 0.05));
-      await withTimeout(new Promise((res) => {
-        if (v.readyState >= 2) return res();
-        const to = setTimeout(res, 12000);
-        v.addEventListener("seeked", function on() {
-          v.removeEventListener("seeked", on);
-          if (v.readyState >= 2) { clearTimeout(to); res(); }
-          else {
-            const t2 = setTimeout(() => { clearTimeout(to); res(); }, 3000);
-            v.addEventListener("canplay", () => { clearTimeout(t2); clearTimeout(to); res(); }, { once: true });
-          }
-        }, { once: true });
-      }), 15000, "シークタイムアウト");
-      draw();
-      phase("シーク完了 t=" + v.currentTime.toFixed(2) + "s — 再生キャプチャ開始");
+        const sw = v.videoWidth || 1280, sh = v.videoHeight || 720;
+        const scale = Math.min(opts.w / sw, opts.h / sh);
+        const dw = Math.max(2, Math.round(sw * scale / 2) * 2), dh = Math.max(2, Math.round(sh * scale / 2) * 2);
+        const dx = (opts.w - dw) / 2, dy = (opts.h - dh) / 2;
+        const draw = () => {
+          ctx.fillStyle = "#000";
+          ctx.fillRect(0, 0, opts.w, opts.h);
+          try { ctx.drawImage(v, dx, dy, dw, dh); } catch (e) {}
+        };
+        const tick = 1 / opts.fps;
+        const clipDur = clip.out - clip.in;
+        const baseUs = Math.round(clip.tl * 1e6);
+        const tickUs = Math.round(1e6 / opts.fps);
+        const totalTicks = Math.max(1, Math.round(clipDur / tick));
+        const emitTick = () => {
+          const vf = new VideoFrame(ctx.canvas, { timestamp: baseUs + state.nTicks * tickUs, duration: tickUs });
+          encoder.encode(vf, { keyFrame: state.nTicks === 0 });
+          vf.close();
+          state.nTicks++;
+        };
 
-      // 再生してリアルタイムキャプチャ（失敗したらシークステップにフォールバック）
-      let playing = false;
-      try { await withTimeout(v.play(), 5000, "playタイムアウト"); playing = true; } catch (e) { playing = false; }
-      phase(playing ? "再生開始OK" : "再生開始できず");
-
-      let captureOk = false;
-      const raf = () => new Promise((r) => requestAnimationFrame(r));
-      const captureOnce = async () => {
-        let lastT = -1, lastMove = Date.now(), lastBeat = 0;
-        while (!v.ended && !v.paused && v.currentTime < clip.out - 0.004) {
-          const now = Date.now();
-          if (v.currentTime > lastT + 0.002) { lastT = v.currentTime; lastMove = now; }
-          else if (now - lastMove > 5000) {
-            phase("⚠ 再生停滞（t=" + v.currentTime.toFixed(2) + "s / " + nTicks + "f）");
-            return false;
-          }
-          if (now - lastBeat > 2000) { lastBeat = now; phase("キャプチャ中 t=" + v.currentTime.toFixed(2) + "s / " + clip.out.toFixed(2) + "s (" + nTicks + "f)"); }
-          const elapsed = v.currentTime - clip.in;
-          draw();
-          while (nTicks < elapsed / tick && nTicks < totalTicks) {
-            emitTick();
-            if (encoder.encodeQueueSize > 24) await sleep(2);
-          }
-          progressCb(Math.min(nTicks, totalTicks), totalTicks);
-          await raf();
-        }
-        return true;
-      };
-      if (playing) {
-        let ok = await captureOnce();
-        for (let retry = 0; !ok && retry < 2; retry++) {
-          phase("再生を再試行 (" + (retry + 1) + "/2)…");
-          try {
-            v.pause();
-            v.currentTime = Math.max(clip.in, v.currentTime - 0.4) + 0.0005;
-            await sleep(400);
-            await withTimeout(v.play(), 5000, "playタイムアウト");
-            ok = await captureOnce();
-          } catch (e) { phase("再試行失敗: " + (e.message || e)); }
-        }
-        try { v.pause(); } catch (e) {}
-        captureOk = nTicks >= totalTicks || (ok && v.ended);
-        phase("再生キャプチャ終了 " + nTicks + "/" + totalTicks + "フレーム" + (captureOk ? "" : "（未完 — 補完します）"));
-        if (!captureOk) {
-          // 停滞した時点のフレームから、残りをシークで補完（90秒で打ち切り）
-          const deadline = Date.now() + 90000;
-          for (let t = Math.max(0, nTicks * tick); t < clipDur; t += 1 / 60) {
-            if (Date.now() > deadline) {
-              throw new Error("AV1クリップの再生がこのブラウザでは進みません（" + clip.mediaName.slice(0, 30) + "）。①Safariアプリで開き直す ②PC版Chrome/Edge ③exe版 をお試しください");
+        // in点へシーク
+        v.currentTime = Math.min(clip.in, Math.max(0, v.duration - 0.05));
+        await withTimeout(new Promise((res) => {
+          if (v.readyState >= 2) return res();
+          const to = setTimeout(res, 12000);
+          v.addEventListener("seeked", function on() {
+            v.removeEventListener("seeked", on);
+            if (v.readyState >= 2) { clearTimeout(to); res(); }
+            else {
+              const t2 = setTimeout(() => { clearTimeout(to); res(); }, 3000);
+              v.addEventListener("canplay", () => { clearTimeout(t2); clearTimeout(to); res(); }, { once: true });
             }
-            const target = Math.min(clip.in + t, clip.out - 0.004);
-            await withTimeout(new Promise((res, rej) => {
-              const to = setTimeout(() => rej(new Error("シークタイムアウト")), 8000);
-              v.addEventListener("seeked", () => { clearTimeout(to); res(); }, { once: true });
-              try { v.currentTime = target + 0.0005; } catch (e) { clearTimeout(to); rej(e); }
-            }), 10000, "シークタイムアウト").catch(() => {});
-            if (v.readyState >= 2) await sleep(30);
+          }, { once: true });
+        }), 15000, "シークタイムアウト");
+        draw();
+        phase("シーク完了 t=" + v.currentTime.toFixed(2) + "s — 再生キャプチャ開始");
+
+        let playing = false;
+        try { await withTimeout(v.play(), 5000, "playタイムアウト"); playing = true; } catch (e) { playing = false; }
+
+        const raf = () => new Promise((r) => requestAnimationFrame(r));
+        const captureOnce = async () => {
+          let lastT = -1, lastMove = Date.now(), lastBeat = 0;
+          while (!v.ended && !v.paused && v.currentTime < clip.out - 0.004) {
+            const now = Date.now();
+            if (v.currentTime > lastT + 0.002) { lastT = v.currentTime; lastMove = now; }
+            else if (now - lastMove > 5000) {
+              phase("⚠ 再生停滞（t=" + v.currentTime.toFixed(2) + "s / " + state.nTicks + "f）");
+              return false;
+            }
+            if (now - lastBeat > 2000) { lastBeat = now; phase("キャプチャ中 t=" + v.currentTime.toFixed(2) + "s / " + clip.out.toFixed(2) + "s (" + state.nTicks + "f)"); }
+            const elapsed = v.currentTime - clip.in;
             draw();
-            while (nTicks < t + 1 / 60 && nTicks < totalTicks) {
+            while (state.nTicks < elapsed / tick && state.nTicks < totalTicks) {
               emitTick();
               if (encoder.encodeQueueSize > 24) await sleep(2);
             }
-            progressCb(Math.min(nTicks, totalTicks), totalTicks);
+            progressCb(Math.min(state.nTicks, totalTicks), totalTicks);
+            await raf();
+          }
+          return true;
+        };
+        let ok = false;
+        if (playing) {
+          ok = await captureOnce();
+          for (let retry = 0; !ok && retry < 2; retry++) {
+            phase("再生を再試行 (" + (retry + 1) + "/2)…");
+            try {
+              v.pause();
+              v.currentTime = Math.max(clip.in, v.currentTime - 0.4) + 0.0005;
+              await sleep(400);
+              await withTimeout(v.play(), 5000, "playタイムアウト");
+              ok = await captureOnce();
+            } catch (e) { phase("再試行失敗: " + (e.message || e)); }
           }
         }
-      } else {
-        phase("再生開始できず — シークステップモードで実行（低速）");
-        const step = 1 / 60;
-        for (let t = 0; t < clipDur; t += step) {
-          const target = Math.min(clip.in + t, clip.out - 0.004);
-          await withTimeout(new Promise((res, rej) => {
-            const to = setTimeout(() => rej(new Error("シークタイムアウト")), 10000);
-            v.addEventListener("seeked", () => { clearTimeout(to); res(); }, { once: true });
-            try { v.currentTime = target + 0.0005; } catch (e) { clearTimeout(to); rej(e); }
-          }), 12000, "シークタイムアウト");
-          if (v.readyState < 2) await sleep(60);
-          draw();
-          while (nTicks < t + step && nTicks < totalTicks) {
-            emitTick();
-            if (encoder.encodeQueueSize > 24) await sleep(2);
+        try { v.pause(); } catch (e) {}
+
+        // 再生で取り切れなかった分をシークで補完（90秒打ち切り）
+        if (state.nTicks < totalTicks) {
+          const deadline = Date.now() + 90000;
+          let seekFails = 0;
+          for (let t = state.nTicks * tick; t < clipDur; t += 1 / 60) {
+            if (Date.now() > deadline || seekFails > 20) break;
+            const target = Math.min(clip.in + t, clip.out - 0.004);
+            const okSeek = await withTimeout(new Promise((res) => {
+              const to = setTimeout(() => res(false), 6000);
+              v.addEventListener("seeked", () => { clearTimeout(to); res(true); }, { once: true });
+              try { v.currentTime = target + 0.0005; } catch (e) { clearTimeout(to); res(false); }
+            }), 8000, "seek").catch(() => false);
+            if (!okSeek) { seekFails++; continue; }
+            if (v.readyState >= 2) await sleep(20);
+            draw();
+            while (state.nTicks < t + 1 / 60 && state.nTicks < totalTicks) {
+              emitTick();
+              if (encoder.encodeQueueSize > 24) await sleep(2);
+            }
+            progressCb(Math.min(state.nTicks, totalTicks), totalTicks);
           }
-          progressCb(Math.min(nTicks, totalTicks), totalTicks);
         }
+        phase("ソース完了 " + state.nTicks + "/" + totalTicks + "フレーム");
+        return state.nTicks >= totalTicks;
+      } catch (e) {
+        phase("⚠ " + (e.message || e));
+        return state.nTicks > 0; // 一部取れてたら継続扱い
+      } finally {
+        try { v.pause(); v.removeAttribute("src"); v.load(); v.remove(); } catch (e) {}
+        URL.revokeObjectURL(url);
       }
-      // 残りtickは最後のフレームで補完
-      while (nTicks < totalTicks) {
-        emitTick();
-        if (encoder.encodeQueueSize > 24) await sleep(2);
+    };
+
+    // 1) ローカルblobで試す
+    let done = await attempt(mediaBlob, "元データ (" + Math.round(mediaBlob.size / 1048576) + "MB)");
+    // 2) ダメなら補助サーバーでH.264変換版を取得して続行
+    const hb = helperBase();
+    if (!done && hb) {
+      phase("🛟 補助サーバーでH.264変換を依頼…（数十秒）: " + hb);
+      try {
+        const resp = await fetch(hb + "/convert?name=" + encodeURIComponent(clip.mediaName));
+        if (!resp.ok) {
+          const t = await resp.text().catch(() => "");
+          throw new Error("HTTP " + resp.status + " " + t.slice(0, 80));
+        }
+        const total = +(resp.headers.get("content-length") || 0);
+        const reader = resp.body.getReader();
+        const chunks = [];
+        let got = 0, lastLog = 0;
+        while (true) {
+          const r = await reader.read();
+          if (r.done) break;
+          chunks.push(r.value);
+          got += r.value.length;
+          if (Date.now() - lastLog > 3000) {
+            lastLog = Date.now();
+            phase("🛟 変換済みデータ受信 " + (got / 1048576).toFixed(1) + (total ? " / " + (total / 1048576).toFixed(1) + " MB" : " MB"));
+          }
+        }
+        const convBlob = new Blob(chunks, { type: "video/mp4" });
+        phase("🛟 変換済み (" + (convBlob.size / 1048576).toFixed(1) + "MB) で再キャプチャ");
+        done = await attempt(convBlob, "サーバー変換版 H.264");
+      } catch (e) {
+        phase("🛟 補助サーバーエラー: " + (e.message || e));
       }
-      phase("クリップ完了 " + nTicks + "フレーム");
-      return { emitted: nTicks };
-    } finally {
-      try { v.pause(); v.removeAttribute("src"); v.load(); } catch (e) {}
-      try { v.remove(); } catch (e) {}
-      URL.revokeObjectURL(url);
+    } else if (!done && !hb) {
+      phase("※ 補助サーバー未設定（出力設定の🛟にURLを入れるとサーバー変換できます）");
     }
+    if (!done) {
+      throw new Error("クリップを処理できません: " + clip.mediaName.slice(0, 30) + "（🛟補助サーバーの設定、Safariで開き直し、PC版、exe版を検討）");
+    }
+    return { emitted: state.nTicks };
   }
 
   /* ---------- audio ---------- */

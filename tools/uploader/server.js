@@ -15,6 +15,92 @@ const PORT = parseInt(process.env.PORT || "3000", 10);
 const HOST = "0.0.0.0";
 const DIR = process.env.UPLOAD_DIR || "/tmp/wfp-upload";
 const PARTS = path.join(DIR, "parts");
+const CONVERT_DIR = path.join(DIR, "convert");
+fs.mkdirSync(CONVERT_DIR, { recursive: true });
+const convertJobs = new Map();
+
+async function ensureFfmpeg() {
+  const p = "/tmp/ffmpeg-bin/ffmpeg";
+  if (fs.existsSync(p)) return p;
+  fs.mkdirSync("/tmp/ffmpeg-bin", { recursive: true });
+  await new Promise((resolve) => execFile("pip", ["download", "imageio-ffmpeg", "--no-deps", "-q", "-d", "/tmp/ffdl2"], { timeout: 180000 }, () => resolve()));
+  const whl = (fs.readdirSync("/tmp/ffdl2").find((f) => f.endsWith(".whl"))) || "";
+  if (!whl) throw new Error("ffmpeg wheel download failed");
+  fs.rmSync("/tmp/ffwhl2", { recursive: true, force: true });
+  await new Promise((resolve) => execFile("python3", ["-m", "zipfile", "-e", "/tmp/ffdl2/" + whl, "/tmp/ffwhl2"], { timeout: 60000 }, () => resolve()));
+  const findBin = (d) => {
+    for (const f of fs.readdirSync(d, { withFileTypes: true })) {
+      const fp = path.join(d, f.name);
+      if (f.isDirectory()) { const r = findBin(fp); if (r) return r; }
+      else if (f.name.startsWith("ffmpeg-") && !f.name.endsWith(".txt")) return fp;
+    }
+    return null;
+  };
+  const bin = findBin("/tmp/ffwhl2");
+  if (!bin) throw new Error("ffmpeg binary not found in wheel");
+  fs.copyFileSync(bin, p);
+  fs.chmodSync(p, 0o755);
+  return p;
+}
+
+/* 指定メディア名をbundleから取り出しH.264へ変換（結果はキャッシュ） */
+async function getConverted(name) {
+  const hex = crypto.createHash("md5").update(name).digest("hex");
+  const out = path.join(CONVERT_DIR, hex + ".mp4");
+  if (fs.existsSync(out)) return out;
+  if (!convertJobs.has(name)) {
+    convertJobs.set(name, (async () => {
+      const ff = await ensureFfmpeg();
+      const bundles = fs.readdirSync(DIR).filter((f) => f.endsWith(".zip"));
+      if (!bundles.length) throw new Error("bundle zip not found on server");
+      const bundle = path.join(DIR, bundles[0]);
+      const src = path.join(CONVERT_DIR, "src_" + hex);
+      await new Promise((resolve, reject) => {
+        execFile("unzip", ["-p", bundle, "Medias/*/" + name], { maxBuffer: 300 * 1024 * 1024, encoding: "buffer", timeout: 120000 },
+          (err, stdout) => {
+            if (err || !stdout || !stdout.length) return reject(new Error("media not found: " + name));
+            fs.writeFileSync(src, stdout);
+            resolve();
+          });
+      });
+      await new Promise((resolve, reject) => {
+        execFile(ff, ["-hide_banner", "-y", "-i", src, "-map", "0:v:0", "-map", "0:a:0?",
+          "-c:v", "libx264", "-preset", "veryfast", "-crf", "22", "-pix_fmt", "yuv420p",
+          "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart", out],
+          { timeout: 900000, maxBuffer: 1024 * 1024 },
+          (e) => (e ? reject(new Error("transcode failed: " + e.message)) : resolve()));
+      });
+      try { fs.unlinkSync(src); } catch (e) {}
+      return out;
+    })().catch((e) => { convertJobs.delete(name); throw e; }));
+  }
+  return convertJobs.get(name);
+}
+
+function serveMp4(req, res, file, downloadName) {
+  const size = fs.statSync(file).size;
+  const range = req.headers.range;
+  const base = {
+    "Content-Type": "video/mp4",
+    "Accept-Ranges": "bytes",
+    "Cache-Control": "public, max-age=86400",
+  };
+  if (range) {
+    const m = range.match(/bytes=(\d*)-(\d*)/);
+    let start = m && m[1] ? parseInt(m[1], 10) : 0;
+    let end = m && m[2] ? parseInt(m[2], 10) : size - 1;
+    if (start >= size) { res.writeHead(416, Object.assign({ "Content-Range": "bytes */" + size }, CORS)); res.end(); return; }
+    end = Math.min(end, size - 1);
+    res.writeHead(206, Object.assign({
+      "Content-Length": end - start + 1,
+      "Content-Range": "bytes " + start + "-" + end + "/" + size,
+    }, base, CORS));
+    fs.createReadStream(file, { start, end }).pipe(res);
+  } else {
+    res.writeHead(200, Object.assign({ "Content-Length": size }, base, CORS));
+    fs.createReadStream(file).pipe(res);
+  }
+}
 const MAX_BODY = 32 * 1024 * 1024; // hard cap per chunk request
 
 fs.mkdirSync(PARTS, { recursive: true });
@@ -134,6 +220,20 @@ const server = http.createServer(async (req, res) => {
     /* ---------------- render app ---------------- */
     const RENDER_SCRIPT = path.join(__dirname, "..", "render", "render.py");
     const RENDER_ROOT = path.join(DIR, "render");
+
+    if (req.method === "GET" && p === "/convert") {
+      const name = u.searchParams.get("name") || "";
+      if (!name || name.includes("/") || name.includes("\\") || name.includes("..")) {
+        json(res, 400, { ok: false, error: "bad name" }); return;
+      }
+      try {
+        const file = await getConverted(name);
+        serveMp4(req, res, file);
+      } catch (e) {
+        json(res, 500, { ok: false, error: String((e && e.message) || e) });
+      }
+      return;
+    }
 
     if (req.method === "GET" && p === "/render") {
       const html = fs.readFileSync(path.join(__dirname, "render.html"));
