@@ -777,23 +777,29 @@
     const clips = parsed.videoClips;
     let totalFrames = 0;
 
+    // モバイル（特にiOSアプリ内WebView）はAV1連続デコードでページごと固まるため
+    // WebCodecsを最初から使わない（?wc=1 で強制有効）
+    const tryWC = !isMobile || new URLSearchParams(location.search).get("wc") === "1";
+    if (!tryWC) phase("モバイル判定: 全クリップ互換モードで実行（WebCodecs無効）");
+
     // 実デコード事前プローブ（isConfigSupportedが嘘をつく環境向け）
     const fallbackCodecs = new Set();
     const probed = new Set();
     const guidCodec = new Map();
-    for (const c of clips) {
-      const blob0 = blobs.get(c.guid);
-      if (!blob0) continue;
-      const vt0 = await inspectHead(blob0);
-      if (vt0 && vt0.codec) guidCodec.set(c.guid, vt0.codec);
-      if (!vt0 || !vt0.codec || probed.has(vt0.codec)) continue;
-      probed.add(vt0.codec);
-      setProg(0.08, "コーデック動作確認: " + vt0.codec);
-      // 実デコード試験のためにこの1ファイルだけ全体を読む
-      const ab0 = await blob0.arrayBuffer();
-      const ok = await probeDecode(ab0, vt0);
-      if (!ok) fallbackCodecs.add(vt0.codec);
-      phase("プローブ " + vt0.codec + ": " + (ok ? "WebCodecs OK" : "NG → 互換モード"));
+    if (tryWC) {
+      for (const c of clips) {
+        const blob0 = blobs.get(c.guid);
+        if (!blob0) continue;
+        const vt0 = await inspectHead(blob0);
+        if (vt0 && vt0.codec) guidCodec.set(c.guid, vt0.codec);
+        if (!vt0 || !vt0.codec || probed.has(vt0.codec)) continue;
+        probed.add(vt0.codec);
+        setProg(0.08, "コーデック動作確認: " + vt0.codec);
+        const ab0 = await blob0.arrayBuffer();
+        const ok = await probeDecode(ab0, vt0);
+        if (!ok) fallbackCodecs.add(vt0.codec);
+        phase("プローブ " + vt0.codec + ": " + (ok ? "WebCodecs OK" : "NG → 互換モード"));
+      }
     }
     if (fallbackCodecs.size) {
       prog.innerHTML = "⚠️ " + esc([...fallbackCodecs].join(", ")) + " はWebCodecsでデコード不可のため <b>互換モード</b>（video要素から取得・時間かかめ）で処理します";
@@ -809,7 +815,7 @@
       };
       let r;
       const codecOf = guidCodec.get(c.guid);
-      const directCompat = codecOf && fallbackCodecs.has(codecOf);
+      const directCompat = !tryWC || (codecOf && fallbackCodecs.has(codecOf));
       phase("クリップ " + (ci + 1) + "/" + clips.length + " 開始: " + c.mediaName.slice(0, 36) + (directCompat ? "（互換モード）" : ""));
       if (directCompat) {
         // プローブ済みNG: 重い前処理（全サンプル解析）を飛ばして直接互換モードへ
