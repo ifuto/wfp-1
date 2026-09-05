@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0f1117">
+<title>編集データ → 動画 書き出し（4K120 / 1080p）</title>
+<style>
+  :root { --bg:#0f1117; --card:#181b24; --border:#2a2f3d; --text:#e8eaf0; --sub:#9aa1b5; --accent:#4f8cff; --accent2:#3ddc97; --warn:#ffb84d; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font-family:system-ui,-apple-system,"Segoe UI",Meiryo,sans-serif; line-height:1.6; -webkit-text-size-adjust:100%; }
+  .wrap { max-width:720px; margin:0 auto; padding:20px 14px 90px; }
+  h1 { font-size:20px; margin:8px 0 4px; }
+  .sub { color:var(--sub); font-size:13px; margin:0 0 16px; }
+  .card { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:18px; margin-bottom:14px; }
+  .card h2 { font-size:15px; margin:0 0 10px; color:var(--accent2); }
+  .kv { display:grid; grid-template-columns:auto 1fr; gap:4px 14px; font-size:13px; }
+  .kv dt { color:var(--sub); }
+  .kv dd { margin:0; word-break:break-all; }
+  .presets { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+  .preset { border:2px solid var(--border); border-radius:12px; padding:14px; cursor:pointer; text-align:center; }
+  .preset.sel { border-color:var(--accent2); background:#14231c; }
+  .preset .res { font-size:18px; font-weight:800; }
+  .preset .fps { color:var(--accent2); font-weight:700; }
+  .preset .note { font-size:11px; color:var(--sub); }
+  button { background:var(--accent); color:#fff; border:none; border-radius:10px; padding:14px 20px; font-size:16px; font-weight:700; cursor:pointer; min-height:48px; }
+  button.green { background:var(--accent2); color:#08281a; }
+  button.big { width:100%; padding:18px; font-size:17px; }
+  button:disabled { opacity:.4; cursor:not-allowed; }
+  .bar { height:14px; background:#10131b; border-radius:8px; overflow:hidden; margin:10px 0 6px; }
+  .bar > div { height:100%; width:0; background:linear-gradient(90deg,var(--accent),var(--accent2)); transition:width .3s; }
+  .status { font-size:13px; color:var(--sub); }
+  .status b { color:var(--text); }
+  .warn { background:#2a2416; border:1px solid #5a4a1a; color:var(--warn); border-radius:8px; padding:10px 12px; font-size:12px; margin-top:10px; }
+  .log { background:#10131b; border:1px solid var(--border); border-radius:8px; padding:8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--sub); white-space:pre-wrap; max-height:110px; overflow:auto; margin-top:8px; }
+  .hidden { display:none; }
+  a.btn { text-decoration:none; display:inline-block; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>🎬 編集データ → 動画レンダラー</h1>
+  <p class="sub">Filmora の .wfpbundle を読み込んで、編集結果を 4K 120fps または 1080p で MP4 書き出しします（サーバー側でffmpegが処理）。編集はできませんが、アップロードされた編集データから結果を出力できます。</p>
+
+  <div class="card">
+    <h2>📚 読み込み済みプロジェクト</h2>
+    <div class="status" id="infoStatus">読み込み中…</div>
+    <dl class="kv hidden" id="infoKv"></dl>
+  </div>
+
+  <div class="card">
+    <h2>⚙️ 出力設定</h2>
+    <div class="presets" id="presets">
+      <div class="preset sel" data-w="3840" data-h="2160" data-fps="120">
+        <div class="res">4K</div><div class="fps">120fps</div><div class="note">リクエスト指定・アップスケール</div>
+      </div>
+      <div class="preset" data-w="1920" data-h="1080" data-fps="120">
+        <div class="res">1080p</div><div class="fps">120fps</div><div class="note">ソース解像度</div>
+      </div>
+      <div class="preset" data-w="3840" data-h="2160" data-fps="60">
+        <div class="res">4K</div><div class="fps">60fps</div><div class="note">軽め</div>
+      </div>
+      <div class="preset" data-w="1920" data-h="1080" data-fps="60">
+        <div class="res">1080p</div><div class="fps">60fps</div><div class="note">最速</div>
+      </div>
+    </div>
+    <div class="warn">
+      ⚠️ 再現するのは<b>カット編集（トリミング・並び順）と音声ミックス（BGM＋クリップ音）</b>までです。Filmora独自のエフェクト・テキスト・ステッカー・トランジション・音量カーブはソースに含まれないため再現されません（該当クリップはスキップ）。ソースは720p60のため、4K/120fpsはアップスケール・フレーム複製になります。
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>🚀 レンダリング</h2>
+    <button class="green big" id="startBtn">この設定で書き出す</button>
+    <div class="bar hidden" id="bar"><div id="barFill"></div></div>
+    <div class="status" id="prog"></div>
+    <div class="log hidden" id="log"></div>
+    <div style="margin-top:12px" class="hidden" id="dlWrap">
+      <a class="btn" id="dlLink" href="#"><button class="green big">⬇️ MP4をダウンロード</button></a>
+      <div class="status" style="margin-top:6px" id="fileMeta"></div>
+    </div>
+    <div class="status" style="margin-top:10px">4K120の書き出しは数十分かかることがあります。ページを閉じても処理は続きます（このページを開き直せば進捗が見られます）。</div>
+  </div>
+
+  <div class="card">
+    <h2>📤 別の編集データをレンダーしたい場合</h2>
+    <div class="status"><a href="/" style="color:var(--accent)">アップロードページ</a> から .wfpbundle をアップロードすると、このページでレンダーできるようになります（60fps/1080p以外のタイムラインでも動作します）。</div>
+  </div>
+</div>
+
+<script>
+(function () {
+  "use strict";
+  const MB = 1048576;
+  const presets = document.getElementById("presets");
+  const startBtn = document.getElementById("startBtn");
+  const bar = document.getElementById("bar");
+  const barFill = document.getElementById("barFill");
+  const prog = document.getElementById("prog");
+  const logBox = document.getElementById("log");
+  const dlWrap = document.getElementById("dlWrap");
+  const dlLink = document.getElementById("dlLink");
+  const fileMeta = document.getElementById("fileMeta");
+  const infoStatus = document.getElementById("infoStatus");
+  const infoKv = document.getElementById("infoKv");
+  let sel = { w: 3840, h: 2160, fps: 120 };
+  let timer = null;
+
+  presets.addEventListener("click", (e) => {
+    const el = e.target.closest(".preset");
+    if (!el) return;
+    presets.querySelectorAll(".preset").forEach((x) => x.classList.remove("sel"));
+    el.classList.add("sel");
+    sel = { w: +el.dataset.w, h: +el.dataset.h, fps: +el.dataset.fps };
+    pollStatus(true);
+  });
+
+  function esc(s) { return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
+  function qs() { return "?w=" + sel.w + "&h=" + sel.h + "&fps=" + sel.fps; }
+  function fmt(n) { return n >= MB ? (n / MB).toFixed(1) + " MB" : (n / 1024).toFixed(0) + " KB"; }
+  function fmtDur(s) { const m = Math.floor(s / 60), r = Math.round(s % 60); return m + "分" + r + "秒"; }
+
+  fetch("/render/info").then((r) => r.json()).then((j) => {
+    if (!j.ok) { infoStatus.textContent = "読み込みエラー: " + j.error; return; }
+    const p = j.project;
+    infoKv.classList.remove("hidden");
+    infoStatus.classList.add("hidden");
+    infoKv.innerHTML =
+      "<dt>プロジェクト</dt><dd>" + esc(p.project) + "</dd>" +
+      "<dt>エディタ</dt><dd>" + esc(p.editor) + "</dd>" +
+      "<dt>タイムライン</dt><dd>" + p.timeline.w + "×" + p.timeline.h + " @ " + p.timeline.fps + "fps</dd>" +
+      "<dt>長さ</dt><dd>" + fmtDur(p.durationSec) + "</dd>" +
+      "<dt>映像クリップ</dt><dd>" + p.videoClips + " 本</dd>" +
+      "<dt>音声</dt><dd>" + p.audioClips + " トラック（BGM含む）</dd>" +
+      "<dt>BGM</dt><dd>" + esc((p.audioMedia || [])[0] || "-") + "</dd>";
+  }).catch((e) => (infoStatus.textContent = "読み込みエラー: " + e));
+
+  startBtn.addEventListener("click", async () => {
+    startBtn.disabled = true;
+    prog.textContent = "開始中…";
+    try {
+      const r = await fetch("/render/start", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(sel) });
+      const j = await r.json();
+      if (!j.ok && r.status === 409) { prog.textContent = "⚠️ 別のレンダーが実行中です (" + j.preset + ")。終わってから再試行してください。"; startBtn.disabled = false; return; }
+      if (!j.ok) throw new Error(j.error || r.status);
+      pollStatus();
+    } catch (e) {
+      prog.textContent = "開始失敗: " + e.message;
+      startBtn.disabled = false;
+    }
+  });
+
+  function pollStatus(immediate) {
+    clearTimeout(timer);
+    const tick = async () => {
+      try {
+        const r = await fetch("/render/status" + qs());
+        const j = await r.json();
+        bar.classList.remove("hidden");
+        logBox.classList.remove("hidden");
+        const pr = j.progress;
+        if (j.running && pr) {
+          barFill.style.width = (pr.frac * 100).toFixed(1) + "%";
+          prog.innerHTML = "🔄 " + esc(pr.msg || pr.state) + " ・ <b>" + (pr.frac * 100).toFixed(0) + "%</b>";
+          logBox.textContent = j.logTail || "";
+          startBtn.disabled = true;
+        } else if (pr && pr.state === "error") {
+          barFill.style.width = "100%";
+          prog.innerHTML = "❌ エラー: <b>" + esc(pr.msg) + "</b>";
+          logBox.textContent = j.logTail || "";
+          startBtn.disabled = false;
+        } else if (j.hasFile) {
+          barFill.style.width = "100%";
+          prog.innerHTML = "✅ 書き出し完了！";
+          dlWrap.classList.remove("hidden");
+          dlLink.href = "/render/file" + qs();
+          fileMeta.textContent = fmt(j.size) + " ・ " + sel.w + "×" + sel.h + "@" + sel.fps + "fps";
+          logBox.textContent = j.logTail || "";
+          startBtn.disabled = false;
+        } else if (pr) {
+          prog.innerHTML = "⏸ 前回の状態: " + esc(pr.msg || pr.state) + "（「書き出す」で再開・続きから）";
+          startBtn.disabled = false;
+        } else {
+          prog.textContent = "未レンダリング。「この設定で書き出す」を押してください。";
+          startBtn.disabled = false;
+        }
+      } catch (e) { prog.textContent = "狀態取得失敗: " + e.message; startBtn.disabled = false; }
+      timer = setTimeout(tick, 2500);
+    };
+    if (immediate) tick(); else timer = setTimeout(tick, 1200);
+  }
+  pollStatus(true);
+})();
+</script>
+</body>
+</html>

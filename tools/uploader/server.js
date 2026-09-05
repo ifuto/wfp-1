@@ -131,6 +131,81 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    /* ---------------- render app ---------------- */
+    const RENDER_SCRIPT = path.join(__dirname, "..", "render", "render.py");
+    const RENDER_ROOT = path.join(DIR, "render");
+
+    if (req.method === "GET" && p === "/render") {
+      const html = fs.readFileSync(path.join(__dirname, "render.html"));
+      res.writeHead(200, Object.assign({ "Content-Type": "text/html; charset=utf-8" }, CORS));
+      res.end(html);
+      return;
+    }
+
+    if (req.method === "GET" && p === "/render/info") {
+      const r = await new Promise((resolve) => {
+        execFile("python3", [RENDER_SCRIPT, "--info"], { cwd: __dirname, timeout: 120000, maxBuffer: 10 * 1024 * 1024 }, (err, stdout) => resolve({ err, stdout }));
+      });
+      if (r.err) { json(res, 500, { ok: false, error: String(r.err.message) }); return; }
+      try {
+        const data = JSON.parse(r.stdout.trim().split("\n").pop());
+        json(res, 200, { ok: true, project: data });
+      } catch (e) { json(res, 500, { ok: false, error: "parse failed: " + r.stdout.slice(0, 200) }); }
+      return;
+    }
+
+    function renderDir(q) {
+      return path.join(RENDER_ROOT, (q.get("w") || "3840") + "x" + (q.get("h") || "2160") + "@" + (q.get("fps") || "120"));
+    }
+
+    if (req.method === "POST" && p === "/render/start") {
+      const body = JSON.parse((await readBody(req, 64 * 1024)).toString("utf8"));
+      const w = parseInt(body.w, 10), h = parseInt(body.h, 10), fps = parseInt(body.fps, 10);
+      if (![w, h, fps].every(Number.isFinite) || w < 16 || h < 16 || w > 7680 || h > 4320 || fps < 1 || fps > 240) {
+        json(res, 400, { ok: false, error: "bad preset" }); return;
+      }
+      if (global.currentRender && global.currentRender.proc.exitCode === null) {
+        json(res, 409, { ok: false, error: "render already running", preset: global.currentRender.preset }); return;
+      }
+      const outDir = path.join(RENDER_ROOT, w + "x" + h + "@" + fps);
+      fs.mkdirSync(outDir, { recursive: true });
+      const proc = execFile("python3", [RENDER_SCRIPT, DIR, outDir, String(w), String(h), String(fps)], { cwd: __dirname, maxBuffer: 1024 * 1024 }, () => {});
+      global.currentRender = { preset: w + "x" + h + "@" + fps, proc, outDir, startedAt: Date.now() };
+      json(res, 200, { ok: true, preset: global.currentRender.preset });
+      return;
+    }
+
+    if (req.method === "GET" && p === "/render/status") {
+      const outDir = renderDir(u.searchParams);
+      let progress = null;
+      try { progress = JSON.parse(fs.readFileSync(path.join(outDir, "progress.json"), "utf8")); } catch {}
+      let hasFile = false, size = 0;
+      try { size = fs.statSync(path.join(outDir, "output.mp4")).size; hasFile = true; } catch {}
+      const job = global.currentRender;
+      const running = !!(job && job.proc.exitCode === null && job.outDir === outDir);
+      let logTail = "";
+      try { logTail = fs.readFileSync(path.join(outDir, "render.log"), "utf8").split("\n").slice(-4).join("\n").slice(-800); } catch {}
+      json(res, 200, { ok: true, running, progress, hasFile, size, logTail });
+      return;
+    }
+
+    if (req.method === "GET" && p === "/render/file") {
+      const outDir = renderDir(u.searchParams);
+      const file = path.join(outDir, "output.mp4");
+      if (!fs.existsSync(file)) { json(res, 404, { ok: false, error: "not rendered yet" }); return; }
+      const s = readSession();
+      const base = (s && s.name ? s.name.replace(/\.wfpbundle\.zip$/i, "").replace(/\.zip$/i, "") : "render") +
+        "_" + (u.searchParams.get("w") || "3840") + "x" + (u.searchParams.get("h") || "2160") + "@" + (u.searchParams.get("fps") || "120") + ".mp4";
+      const asciiFallback = base.replace(/[^\x20-\x7E]/g, "_").replace(/"/g, "");
+      res.writeHead(200, Object.assign({
+        "Content-Type": "video/mp4",
+        "Content-Length": fs.statSync(file).size,
+        "Content-Disposition": 'attachment; filename="' + asciiFallback + '"; filename*=UTF-8\'\'' + encodeURIComponent(base),
+      }, CORS));
+      fs.createReadStream(file).pipe(res);
+      return;
+    }
+
     if (req.method === "GET" && p === "/status") {
       const s = readSession();
       if (!s) { json(res, 200, { session: null }); return; }
