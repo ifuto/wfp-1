@@ -36,7 +36,11 @@
     margin-bottom: 16px;
   }
   .card h2 { font-size: 15px; margin: 0 0 12px; color: var(--accent2); }
+
+  /* ドロップゾーン＝そのまま file input のタップ領域にする */
   #drop {
+    position: relative;
+    display: block;
     border: 2px dashed var(--border);
     border-radius: 12px;
     padding: 36px 16px;
@@ -44,11 +48,38 @@
     color: var(--sub);
     cursor: pointer;
     transition: .15s;
+    overflow: hidden;
+    min-height: 96px;
   }
   #drop.drag { border-color: var(--accent); background: #1b2333; color: var(--text); }
   #drop.has { border-style: solid; border-color: var(--accent2); }
   #drop .name { font-size: 16px; font-weight: 600; color: var(--text); word-break: break-all; }
   #drop .meta { font-size: 12px; color: var(--sub); }
+
+  /* 透明な input をゾーン全面に敷く → JS の .click() なしで純正タップで開く */
+  #fileInput {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    opacity: 0;
+    cursor: pointer;
+  }
+
+  .fallback {
+    margin-top: 12px;
+    font-size: 13px;
+    color: var(--sub);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+  }
+  #fileInputB {
+    font-size: 13px;
+    max-width: 100%;
+  }
+
   .row { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; margin-top: 14px; }
   label.field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--sub); }
   select, input[type=number] {
@@ -123,9 +154,14 @@
 
   <div class="card">
     <h2>① ファイルを選択</h2>
-    <div id="drop">
-      ここにファイルをドロップ、またはタップして選択
-      <input type="file" id="fileInput" hidden>
+    <label id="drop">
+      <span id="dropContent">ここをタップしてファイルを選択（パソコンならドロップもOK）</span>
+      <input type="file" id="fileInput">
+    </label>
+    <div class="fallback">
+      <span>タップしても選択画面が出ない場合は…</span>
+      <input type="file" id="fileInputB">
+      <span>を直接タップ。それでも開かないときは、共有メニューの <b>「Safariで開く」</b> で開き直してね。</span>
     </div>
   </div>
 
@@ -167,8 +203,8 @@
     <div class="btnrow">
       <button class="ghost" id="guideSkip">この分はスキップ（保存済みの場合）</button>
     </div>
-    <div class="status" id="guideHint" style="margin-top:8px">
-      共有シートが開いたら <b>「"ファイル"に保存」</b> をタップ → 保存先（「ダウンロード」など）を選んで保存 → このページに戻って次のボタンをタップ、の繰り返しです。
+    <div class="status" style="margin-top:8px">
+      共有シートが開いたら <b>「“ファイル”に保存」</b> をタップ → 保存先（「ダウンロード」など）を選んで保存 → このページに戻って次のボタンをタップ、の繰り返しです。
     </div>
   </div>
 
@@ -207,7 +243,9 @@
   const MB = 1024 * 1024;
 
   const drop = document.getElementById("drop");
+  const dropContent = document.getElementById("dropContent");
   const fileInput = document.getElementById("fileInput");
+  const fileInputB = document.getElementById("fileInputB");
   const sizePreset = document.getElementById("sizePreset");
   const sizeCustom = document.getElementById("sizeCustom");
   const customWrap = document.getElementById("customWrap");
@@ -236,7 +274,7 @@
   const ua = navigator.userAgent || "";
   const isIOS = /iPad|iPhone|iPod/.test(ua) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
   const isSafariProper = /Safari/i.test(ua) && !/CriOS|FxiOS|EdgiOS|OPiOS|GSA|GoogleApp/i.test(ua);
-  const inAppBrowser = isIOS && !isSafariProper; // Googleアプリなどのアプリ内ブラウザ
+  const inAppBrowser = isIOS && !isSafariProper;
 
   let canShareFiles = false;
   try {
@@ -246,16 +284,14 @@
 
   if (isIOS) {
     iosBanner.classList.remove("hidden");
-    iosBanner.innerHTML = canShareFiles
-      ? "📱 <b>iOS detected</b> — 通常のダウンロードが動かない環境もあるので、保存は<b>「共有」→「"ファイル"に保存」</b>を基本にしてください（一括保存モードを用意してあります）。"
-      : "📱 <b>iOS detected</b> — このブラウザではファイル共有APIが使えないようです。ページを<b>Safariで開き直す</b>と確実です（アプリ内ブラウザの場合は共有ボタン ↗ またはメニュー ⋮ → 「Safariで開く」）。";
-    if (inAppBrowser) {
-      iosBanner.innerHTML += "<br>💡 Googleアプリ内では、メニュー ⋮ → <b>「ブラウザで開く」／「Safariで開く」</b> からSafariで開くのが最も確実です。";
-    }
+    iosBanner.innerHTML =
+      "📱 <b>iOS を検出</b>" +
+      "<br>・保存方法: 共有シート → <b>「“ファイル”に保存」</b>" +
+      (canShareFiles ? "（共有API 利用可能 ✅）" : "（⚠️ このブラウザでは共有APIが使えません。Safariで開くと確実です）") +
+      "<br>・環境: " + (inAppBrowser ? "アプリ内ブラウザ（Googleアプリなど）" : "Safari");
   }
 
-  // ---- ファイル選択 ----
-  drop.addEventListener("click", () => fileInput.click());
+  // ---- ファイル選択（タップは input が直接受けるので JS の click() 不要） ----
   drop.addEventListener("dragover", (e) => { e.preventDefault(); drop.classList.add("drag"); });
   drop.addEventListener("dragleave", () => drop.classList.remove("drag"));
   drop.addEventListener("drop", (e) => {
@@ -263,7 +299,14 @@
     drop.classList.remove("drag");
     if (e.dataTransfer.files.length) setFile(e.dataTransfer.files[0]);
   });
-  fileInput.addEventListener("change", () => { if (fileInput.files.length) setFile(fileInput.files[0]); });
+  fileInput.addEventListener("change", function () {
+    if (this.files && this.files.length) setFile(this.files[0]);
+    this.value = ""; // 同じファイルを再選択できるように
+  });
+  fileInputB.addEventListener("change", function () {
+    if (this.files && this.files.length) setFile(this.files[0]);
+    this.value = "";
+  });
 
   function fmtSize(n) {
     if (n >= 1024 * MB) return (n / (1024 * MB)).toFixed(2) + " GB";
@@ -278,9 +321,9 @@
     splitBtn.disabled = false;
     drop.classList.add("has");
     const parts = Math.ceil(f.size / getChunkSize());
-    drop.innerHTML =
+    dropContent.innerHTML =
       '<div class="name">📄 ' + escapeHtml(f.name) + "</div>" +
-      '<div class="meta">' + fmtSize(f.size) + " ・ 現在の設定で約 " + parts + " パート</div>";
+      '<div class="meta">' + fmtSize(f.size) + " ・ 現在の設定で約 " + parts + " パート ・ タップで選び直し</div>";
   }
 
   sizePreset.addEventListener("change", () => {
@@ -477,16 +520,16 @@
   // guideIdx: -1 = manifest, 0.. = parts
   let guideIdx = -1;
 
-  function guideTotal() { return manifest ? manifest.parts.length + 1 : 0; }
+  function guideTotal() { return manifest ? manifest.parts.length + 1 : 1; }
 
   function resetGuide() {
     guideIdx = -1;
-    updateGuide("共有シートで 「\u201Dファイル\u201Dに保存」 を選んで保存してください。まずは manifest.json から。");
+    updateGuide("共有シートの「“ファイル”に保存」で保存します。まず manifest.json から。");
   }
 
   function updateGuide(msg) {
-    const done = guideIdx;
-    guideBarFill.style.width = (done / guideTotal() * 100).toFixed(1) + "%";
+    const done = Math.max(0, guideIdx < manifest.parts.length ? guideIdx : manifest.parts.length);
+    guideBarFill.style.width = Math.min(100, Math.max(0, guideIdx / guideTotal() * 100)).toFixed(1) + "%";
     if (guideIdx === -1) {
       guideBtn.textContent = "📤 manifest.json を共有して保存";
     } else if (guideIdx < manifest.parts.length) {
@@ -499,13 +542,13 @@
       return;
     }
     if (msg) guideStatus.innerHTML = escapeHtml(msg).replace(/\n/g, "<br>");
-    guideStatus.innerHTML += "<br>進捗: " + Math.max(0, done) + " / " + (guideTotal() - 1) + " パート完了";
+    guideStatus.innerHTML += "<br>進捗: " + done + " / " + manifest.parts.length + " 個完了";
   }
 
   guideBtn.addEventListener("click", async () => {
     if (!manifest) return;
     if (guideIdx >= manifest.parts.length) {
-      updateGuide(); // 完済み
+      updateGuide();
       return;
     }
     let ok;
