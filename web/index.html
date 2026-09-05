@@ -266,7 +266,7 @@
     const ab = await mediaBlob.arrayBuffer();
     const { vt, samples } = await demuxVideo(ab);
     const ts = vt.timescale;
-    const usOf = (s) => Math.round((s.cts / ts) * 1e6);
+    const usOf = (sm) => Math.round((sm.cts / ts) * 1e6);
     const inUs = Math.round(clip.in * 1e6);
     const outUs = Math.round(clip.out * 1e6);
     const clipDurUs = outUs - inUs;
@@ -274,7 +274,6 @@
     const baseUs = Math.round(clip.tl * 1e6);
 
     const cfg = { codec: vt.codec, codedWidth: vt.width, codedHeight: vt.height, description: vt.description };
-    // 環境によって hardware / software デコーダーの当たり外れがあるので両方試す
     const tries = [cfg, Object.assign({}, cfg, { hardwareAcceleration: "prefer-software" })];
     let okCfg = null, lastWhy = "";
     for (const c of tries) {
@@ -288,19 +287,18 @@
       throw new Error("このブラウザは " + vt.codec + "（クリップ: " + clip.mediaName + "）のデコードに非対応です（" + lastWhy + "）。PC版 Chrome / Edge 、または exe版でお試しください");
     }
 
-    // letterbox geometry
     const sw = vt.width || ctx.canvas.width, sh = vt.height || ctx.canvas.height;
     const scale = Math.min(opts.w / sw, opts.h / sh);
     const dw = Math.max(2, Math.round(sw * scale / 2) * 2), dh = Math.max(2, Math.round(sh * scale / 2) * 2);
     const dx = (opts.w - dw) / 2, dy = (opts.h - dh) / 2;
 
-    let nextTick = 0; // relative µs
-    let held = false, err = null, emitted = 0;
+    let nextTick = 0, held = false, emitted = 0;
     const totalTicks = Math.max(1, Math.round(clipDurUs / tickUs));
+    let firstErr = null;
 
     const emitTick = () => {
       const vf = new VideoFrame(ctx.canvas, { timestamp: baseUs + nextTick, duration: tickUs });
-      encoder.encode(vf, { keyFrame: nextTick === 0 || (baseUs + nextTick) % 2000000 === 0 });
+      encoder.encode(vf, { keyFrame: nextTick === 0 });
       vf.close();
       nextTick += tickUs;
       emitted++;
@@ -314,57 +312,69 @@
 
     const decoder = new VideoDecoder({
       output: (f) => {
-        if (err) { f.close(); return; }
         try {
           const l = f.timestamp - inUs;
-          if (l >= clipDurUs) { f.close(); return; }
-          if (l < -1000) { f.close(); return; }
+          if (l >= clipDurUs || l < -1000) { f.close(); return; }
           if (!held) { draw(f); held = true; f.close(); return; }
           while (nextTick < l && nextTick < clipDurUs) emitTick();
           draw(f);
           f.close();
-        } catch (e) { err = e; f.close(); }
+        } catch (e) { if (!firstErr) firstErr = e; try { f.close(); } catch (e2) {} }
       },
-      error: (e) => { if (!err) err = e; },
+      error: (e) => { if (!firstErr) firstErr = e; },
     });
     try {
       decoder.configure(okCfg);
-      if (decoder.state !== "configured") throw new Error("decoder state: " + decoder.state);
     } catch (e) {
       try { decoder.close(); } catch (e2) {}
       throw new Error("デコーダー初期化失敗（" + vt.codec + " / " + clip.mediaName + "）: " + (e.message || e));
     }
 
-    // start feeding from the last keyframe at/before the in-point
+    // feed from the last keyframe at/before the in-point
     let start = 0;
     for (let i = 0; i < samples.length; i++) {
       if (samples[i].is_sync && usOf(samples[i]) <= inUs) start = i;
     }
-    let fed = 0;
     for (let i = start; i < samples.length; i++) {
-      if (err) break;
-      const s = samples[i];
-      const u = usOf(s);
+      if (firstErr || decoder.state !== "configured") break;
+      const sm = samples[i];
+      const u = usOf(sm);
       if (u > outUs) break;
-      while (decoder.decodeQueueSize > 60) await sleep(0);
+      // backpressure on both queues (decoder + encoder)
+      let guard = 0;
+      while (guard++ < 100000 && decoder.state === "configured" &&
+             (decoder.decodeQueueSize > 40 || encoder.encodeQueueSize > 40)) {
+        await sleep(0);
+        if (firstErr) break;
+      }
+      if (firstErr || decoder.state !== "configured") break;
       try {
         decoder.decode(new EncodedVideoChunk({
-          type: s.is_sync ? "key" : "delta",
+          type: sm.is_sync ? "key" : "delta",
           timestamp: u,
-          duration: Math.round((s.duration / ts) * 1e6) || tickUs,
-          data: s.data,
+          duration: Math.round((sm.duration / ts) * 1e6) || tickUs,
+          data: sm.data,
         }));
       } catch (e) {
-        if (!err) err = new Error("デコード失敗（" + vt.codec + " / " + clip.mediaName + "）: " + (e.message || e));
+        if (!firstErr) firstErr = e;
         break;
       }
-      fed++;
     }
-    if (!err) await decoder.flush();
-    decoder.close();
-    if (err) throw err;
-    while (nextTick < clipDurUs) emitTick(); // drain remaining ticks with the last held frame
-    return { emitted, fed };
+    if (!firstErr && decoder.state === "configured") {
+      try { await decoder.flush(); } catch (e) { if (!firstErr) firstErr = e; }
+    }
+    try { decoder.close(); } catch (e) {}
+    if (firstErr) {
+      const isAv1 = /^av01/.test(vt.codec);
+      throw new Error("デコード失敗（" + vt.codec + " / " + clip.mediaName + "）: " +
+        ((firstErr && firstErr.message) ? firstErr.message : String(firstErr)) +
+        (isAv1 ? " ※AV1はこの端末では実デコード不可の可能性があります（PC版 Chrome/Edge または exe版を推奨）" : ""));
+    }
+    while (nextTick < clipDurUs) {
+      emitTick();
+      if (encoder.encodeQueueSize > 40) await sleep(0);
+    }
+    return { emitted };
   }
 
   /* ---------- audio ---------- */
