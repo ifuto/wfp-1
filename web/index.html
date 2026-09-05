@@ -576,8 +576,8 @@
       let buf;
       try {
         const ab = await blob.arrayBuffer();
-        buf = await actx.decodeAudioData(ab);
-      } catch (e) { continue; }
+        buf = await withTimeout(actx.decodeAudioData(ab), 45000, "音声デコードタイムアウト(" + c.mediaName.slice(0, 24) + ")");
+      } catch (e) { phase("⚠ 音声スキップ: " + (e.message || e)); continue; }
       const s = off.createBufferSource();
       s.buffer = buf;
       s.start(Math.max(0, c.tl), Math.max(0, c.in), Math.max(0.01, c.out - c.in));
@@ -585,7 +585,8 @@
       scheduled++;
     }
     if (!scheduled) return null;
-    const rendered = await off.startRendering();
+    phase("音声ミックス実行 (" + scheduled + "トラック)…");
+    const rendered = await withTimeout(off.startRendering(), 180000, "音声ミックスタイムアウト");
     // soft limiter
     for (let ch = 0; ch < rendered.numberOfChannels; ch++) {
       const d = rendered.getChannelData(ch);
@@ -715,16 +716,19 @@
     // 実デコード事前プローブ（isConfigSupportedが嘘をつく環境向け）
     const fallbackCodecs = new Set();
     const probed = new Set();
+    const guidCodec = new Map();
     for (const c of clips) {
       const blob0 = blobs.get(c.guid);
       if (!blob0) continue;
       const ab0 = await blob0.arrayBuffer();
       const vt0 = WM.inspect(ab0).tracks.find((t) => t.handler === "vide");
+      if (vt0 && vt0.codec) guidCodec.set(c.guid, vt0.codec);
       if (!vt0 || !vt0.codec || probed.has(vt0.codec)) continue;
       probed.add(vt0.codec);
       setProg(0.08, "コーデック動作確認: " + vt0.codec);
       const ok = await probeDecode(ab0, vt0);
       if (!ok) fallbackCodecs.add(vt0.codec);
+      phase("プローブ " + vt0.codec + ": " + (ok ? "WebCodecs OK" : "NG → 互換モード"));
     }
     if (fallbackCodecs.size) {
       prog.innerHTML = "⚠️ " + esc([...fallbackCodecs].join(", ")) + " はWebCodecsでデコード不可のため <b>互換モード</b>（video要素から取得・時間かかめ）で処理します";
@@ -739,13 +743,20 @@
           "クリップ " + (ci + 1) + "/" + clips.length + "（" + esc(c.mediaName.slice(0, 28)) + "…）フレーム " + emitted + "/" + total);
       };
       let r;
-      phase("クリップ " + (ci + 1) + "/" + clips.length + " 開始: " + c.mediaName.slice(0, 36));
-      try {
-        r = await renderClip(c, blob, ctx, encoder, { w, h, fps }, pcb, fallbackCodecs);
-      } catch (e) {
-        if (!e || !e.useFallback) throw e;
-        phase("→ WebCodecs失敗のため互換モードへ: " + (e.message || "").slice(0, 80));
+      const codecOf = guidCodec.get(c.guid);
+      const directCompat = codecOf && fallbackCodecs.has(codecOf);
+      phase("クリップ " + (ci + 1) + "/" + clips.length + " 開始: " + c.mediaName.slice(0, 36) + (directCompat ? "（互換モード）" : ""));
+      if (directCompat) {
+        // プローブ済みNG: 重い前処理（全サンプル解析）を飛ばして直接互換モードへ
         r = await renderClipViaVideoElement(c, blob, ctx, encoder, { w, h, fps }, pcb);
+      } else {
+        try {
+          r = await renderClip(c, blob, ctx, encoder, { w, h, fps }, pcb, fallbackCodecs);
+        } catch (e) {
+          if (!e || !e.useFallback) throw e;
+          phase("→ WebCodecs失敗のため互換モードへ: " + (e.message || "").slice(0, 80));
+          r = await renderClipViaVideoElement(c, blob, ctx, encoder, { w, h, fps }, pcb);
+        }
       }
       totalFrames += r.emitted;
       if (encErr) throw encErr;
