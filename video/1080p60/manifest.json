@@ -1,0 +1,46 @@
+{
+ "label": "1080p60",
+ "originalName": "output.mp4",
+ "totalSize": 469154241,
+ "chunkSize": 67108864,
+ "totalParts": 7,
+ "contentType": "video/mp4",
+ "codecs": "video/mp4; codecs=\"avc1.640034, mp4a.40.2\"",
+ "parts": [
+  {
+   "file": "video.part001.bin",
+   "size": 67108864,
+   "sha256": "fdd037b916f07c96e5abf2e7682d78f59a6cdc47792f640a1a7297ea81440a00"
+  },
+  {
+   "file": "video.part002.bin",
+   "size": 67108864,
+   "sha256": "c48d325156bc070c865ac84f7cc19b872de6d9bdbeec6d4d1f41a193b9d986d7"
+  },
+  {
+   "file": "video.part003.bin",
+   "size": 67108864,
+   "sha256": "7e5140f27f6e99374eb9a997873862b64ce0f00742da895b4b7837d2a81db299"
+  },
+  {
+   "file": "video.part004.bin",
+   "size": 67108864,
+   "sha256": "9a1ddb4d499b5a5a6953843692c442fdd38b22bb30e782a93ea835ade857309c"
+  },
+  {
+   "file": "video.part005.bin",
+   "size": 67108864,
+   "sha256": "e78aebcd8f174a9c9ec9c0ba145f5409c72a741f18ce545f357c83a155d0602e"
+  },
+  {
+   "file": "video.part006.bin",
+   "size": 67108864,
+   "sha256": "ffeaf315a6be8f60673c2ed2490b0e78f10c3d9828c706d7a4ff77cf3b5f36ce"
+  },
+  {
+   "file": "video.part007.bin",
+   "size": 66501057,
+   "sha256": "def2baef593e98cecc0be57bae317452cffeb778527c5d887493d6008ce3f430"
+  }
+ ]
+}
