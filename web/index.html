@@ -460,12 +460,22 @@
       const stepUs = Math.round(1e6 / 60); // ソースは60fps前提でサンプリング
       let nextTick = 0, emitted = 0;
       const totalTicks = Math.max(1, Math.round(clipDurUs / tickUs));
+      // iOSはデータ遅延読み込みがあるので、seek後にフレーム準備完了まで待つ
       const seekTo = (sec) => new Promise((res, rej) => {
-        const t = setTimeout(() => { v.removeEventListener("seeked", on); rej(new Error("シークタイムアウト")); }, 10000);
-        const on = () => { clearTimeout(t); res(); };
+        const t = setTimeout(() => { v.removeEventListener("seeked", on); rej(new Error("シークタイムアウト")); }, 12000);
+        const ready = () => {
+          if (v.readyState >= 2) { clearTimeout(t); res(); }
+          else {
+            const t2 = setTimeout(() => { clearTimeout(t); res(); }, 3000); // フレーム来なくても諦めて進む
+            v.addEventListener("canplay", () => { clearTimeout(t2); clearTimeout(t); res(); }, { once: true });
+          }
+        };
+        const on = () => { v.removeEventListener("seeked", on); ready(); };
         v.addEventListener("seeked", on, { once: true });
-        v.currentTime = sec;
+        try { v.currentTime = sec; } catch (e) { clearTimeout(t); rej(e); }
       });
+      // iOSでデータを先に読み込ませる（無音なので自動再生制限にかからない）
+      try { await v.play(); v.pause(); } catch (e) {}
       const draw = () => {
         ctx.fillStyle = "#000";
         ctx.fillRect(0, 0, opts.w, opts.h);
