@@ -43,7 +43,7 @@
 </head>
 <body>
 <div class="wrap">
-  <h1>🎬 wfp render（Web版 — 完全ローカル処理）<span style="font-size:11px;color:#5a6275;font-weight:400"> build v8</span></h1>
+  <h1>🎬 wfp render（Web版 — 完全ローカル処理）<span style="font-size:11px;color:#5a6275;font-weight:400"> build v9</span></h1>
   <p class="sub">Filmora の .wfpbundle をアップロードするだけで、ブラウザ内でレンダリングして MP4 を書き出します。<br>処理はすべてこのブラウザ内で完結（WebCodecs使用・AV1対応・ffmpeg 32MB読み込み不要）。<br>💙 4Kが重い人は <a href="https://github.com/ifuto/wfp-1/raw/arena/01a07073-wfp-1/dist/wfp-render.exe">exe版</a> もあり。</p>
 
   <div class="card">
@@ -491,10 +491,12 @@
     v.muted = true;
     v.playsInline = true;
     v.preload = "auto";
-    // iOS(特にアプリ内WebView)はDOMに繋がっていないvideoを再生させないことがあるため、
-    // 画面外に1pxで取り付ける
-    v.style.cssText = "position:fixed;left:-2px;top:-2px;width:1px;height:1px;opacity:0.01;pointer-events:none;";
-    document.body.appendChild(v);
+    // iOSは「見えないvideo」のデコードをサボる/止めることがあるため、
+    // 処理中クリップを小さくプレビューとして見える位置に出す
+    v.style.cssText = "width:132px;height:auto;border-radius:8px;display:block;margin:4px auto;background:#000;";
+    v.setAttribute("aria-hidden", "true");
+    const anchor = $("renderCard");
+    anchor.insertBefore(v, anchor.firstChild);
     v.src = url;
     try {
       await withTimeout(new Promise((res, rej) => {
@@ -553,15 +555,15 @@
       phase(playing ? "再生開始OK" : "再生開始できず");
 
       let captureOk = false;
-      if (playing) {
-        const raf = () => new Promise((r) => requestAnimationFrame(r));
+      const raf = () => new Promise((r) => requestAnimationFrame(r));
+      const captureOnce = async () => {
         let lastT = -1, lastMove = Date.now(), lastBeat = 0;
         while (!v.ended && !v.paused && v.currentTime < clip.out - 0.004) {
           const now = Date.now();
           if (v.currentTime > lastT + 0.002) { lastT = v.currentTime; lastMove = now; }
-          else if (now - lastMove > 4000) {
-            phase("⚠ 再生が停滞（t=" + v.currentTime.toFixed(2) + "s）— シークステップモードへ切替");
-            break;
+          else if (now - lastMove > 5000) {
+            phase("⚠ 再生停滞（t=" + v.currentTime.toFixed(2) + "s / " + nTicks + "f）");
+            return false;
           }
           if (now - lastBeat > 2000) { lastBeat = now; phase("キャプチャ中 t=" + v.currentTime.toFixed(2) + "s / " + clip.out.toFixed(2) + "s (" + nTicks + "f)"); }
           const elapsed = v.currentTime - clip.in;
@@ -573,12 +575,30 @@
           progressCb(Math.min(nTicks, totalTicks), totalTicks);
           await raf();
         }
+        return true;
+      };
+      if (playing) {
+        let ok = await captureOnce();
+        for (let retry = 0; !ok && retry < 2; retry++) {
+          phase("再生を再試行 (" + (retry + 1) + "/2)…");
+          try {
+            v.pause();
+            v.currentTime = Math.max(clip.in, v.currentTime - 0.4) + 0.0005;
+            await sleep(400);
+            await withTimeout(v.play(), 5000, "playタイムアウト");
+            ok = await captureOnce();
+          } catch (e) { phase("再試行失敗: " + (e.message || e)); }
+        }
         try { v.pause(); } catch (e) {}
-        captureOk = nTicks >= totalTicks || v.ended;
+        captureOk = nTicks >= totalTicks || (ok && v.ended);
         phase("再生キャプチャ終了 " + nTicks + "/" + totalTicks + "フレーム" + (captureOk ? "" : "（未完 — 補完します）"));
         if (!captureOk) {
-          // 停滞した時点のフレームから、残りをシークで補完
+          // 停滞した時点のフレームから、残りをシークで補完（90秒で打ち切り）
+          const deadline = Date.now() + 90000;
           for (let t = Math.max(0, nTicks * tick); t < clipDur; t += 1 / 60) {
+            if (Date.now() > deadline) {
+              throw new Error("AV1クリップの再生がこのブラウザでは進みません（" + clip.mediaName.slice(0, 30) + "）。①Safariアプリで開き直す ②PC版Chrome/Edge ③exe版 をお試しください");
+            }
             const target = Math.min(clip.in + t, clip.out - 0.004);
             await withTimeout(new Promise((res, rej) => {
               const to = setTimeout(() => rej(new Error("シークタイムアウト")), 8000);
