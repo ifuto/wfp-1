@@ -7,10 +7,11 @@
 
 **https://ifuto.github.io/wfp-1/web/**
 
-- リポジトリに分割アップロードされた31パートを HTTP Range で必要分だけ取得して解析
-- （または手元の `.wfpbundle` を直接選択）
-- ffmpeg.wasm でレンダリング: 720p60 / 1080p60 / 1080p120
-- 4Kは重いため非対応（exe版へ）
+- `.wfpbundle` をアップロードするだけで完結（リポジトリ非依存・送信ゼロ）
+- WebCodecs でデコード（AV1/H.264）→ H.264エンコード → WebAudioミックス → MP4化
+  （ffmpeg.wasm不使用・32MBダウンロード不要）
+- 720p60 / 1080p60 / 1080p120 / 4K120（GPUエンコード）
+- デスクトップChrome / Edge 推奨
 
 ## 🖥️ exe版（4K120対応・速い・推奨）
 

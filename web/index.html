@@ -19,43 +19,40 @@
   .kv dd { margin:0; word-break:break-all; }
   button { background:var(--accent); color:#fff; border:none; border-radius:10px; padding:13px 20px; font-size:15px; font-weight:700; cursor:pointer; min-height:46px; }
   button.green { background:var(--accent2); color:#08281a; }
-  button.ghost { background:transparent; border:1px solid var(--border); color:var(--text); font-weight:500; }
-  button.red { background:#c0392b; }
-  button.big { width:100%; padding:16px; font-size:16px; }
   button:disabled { opacity:.4; cursor:not-allowed; }
+  .filebtn { position:relative; display:block; border:2px dashed var(--border); border-radius:12px; padding:34px 14px; text-align:center; color:var(--sub); cursor:pointer; overflow:hidden; }
+  .filebtn.has { border-style:solid; border-color:var(--accent2); }
+  .filebtn input { position:absolute; inset:0; width:100%; height:100%; opacity:0; cursor:pointer; }
+  .filebtn .name { color:var(--text); font-weight:700; word-break:break-all; }
   .bar { height:14px; background:#10131b; border-radius:8px; overflow:hidden; margin:10px 0 6px; }
   .bar > div { height:100%; width:0; background:linear-gradient(90deg,var(--accent),var(--accent2)); transition:width .25s; }
   .status { font-size:13px; color:var(--sub); }
   .status b { color:var(--text); }
-  .presets { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; }
+  .presets { display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:10px; }
   .preset { border:2px solid var(--border); border-radius:12px; padding:12px; cursor:pointer; text-align:center; }
   .preset.sel { border-color:var(--accent2); background:#14231c; }
-  .preset.off { opacity:.35; cursor:not-allowed; }
   .preset .res { font-size:17px; font-weight:800; }
   .preset .fps { color:var(--accent2); font-weight:700; }
   .preset .note { font-size:11px; color:var(--sub); }
   .warn { background:#2a2416; border:1px solid #5a4a1a; color:var(--warn); border-radius:8px; padding:10px 12px; font-size:12px; margin-top:10px; }
-  .log { background:#10131b; border:1px solid var(--border); border-radius:8px; padding:8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--sub); white-space:pre-wrap; max-height:130px; overflow:auto; margin-top:8px; }
   .hidden { display:none; }
   video { width:100%; border-radius:10px; background:#000; }
   a { color:var(--accent); }
-  .row { display:flex; gap:10px; flex-wrap:wrap; margin-top:12px; }
-  .srcbtns { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+  code { background:#10131b; border:1px solid var(--border); border-radius:6px; padding:2px 6px; font-family:ui-monospace,monospace; font-size:12px; }
 </style>
 </head>
 <body>
 <div class="wrap">
-  <h1>🎬 wfp render（Web版）</h1>
-  <p class="sub">Filmora の .wfpbundle をブラウザ内でレンダリングして MP4 に書き出します。サーバー不要・GitHub Pages で動作。<br>💙 4K120は exe版（<a href="https://github.com/ifuto/wfp-1/raw/arena/01a07073-wfp-1/dist/wfp-render.exe">wfp-render.exe</a>）がおすすめ</p>
+  <h1>🎬 wfp render（Web版 — 完全ローカル処理）</h1>
+  <p class="sub">Filmora の .wfpbundle をアップロードするだけで、ブラウザ内でレンダリングして MP4 を書き出します。<br>処理はすべてこのブラウザ内で完結（WebCodecs使用・AV1対応・ffmpeg 32MB読み込み不要）。<br>💙 4Kが重い人は <a href="https://github.com/ifuto/wfp-1/raw/arena/01a07073-wfp-1/dist/wfp-render.exe">exe版</a> もあり。</p>
 
   <div class="card">
-    <h2>① 編集データを読み込む</h2>
-    <div class="srcbtns">
-      <button id="repoBtn" class="green">リポジトリの分割データから読み込む</button>
-      <button id="fileBtn" class="ghost">ローカルの .wfpbundle を選ぶ</button>
-    </div>
-    <input type="file" id="fileInput" accept=".wfpbundle,.wfp,.zip" hidden>
-    <div class="status" style="margin-top:8px" id="srcStatus">未読み込み（上のボタンで開始。リポジトリ読み込みは約1〜30MB程度の通信で解析できます）</div>
+    <h2>① .wfpbundle をアップロード</h2>
+    <label class="filebtn" id="filebtn">
+      <span id="filebtnText">ここをタップして .wfpbundle（または .zip）を選択<br>例: タイトルなし-2026-09-04 22 50 25(copy).wfpbundle</span>
+      <input type="file" id="fileInput" accept=".wfpbundle,.wfp,.zip">
+    </label>
+    <div class="status" style="margin-top:8px" id="srcStatus">待機中（ファイルはどこにも送信されません）</div>
   </div>
 
   <div class="card hidden" id="projCard">
@@ -66,30 +63,26 @@
   <div class="card hidden" id="setCard">
     <h2>② 出力設定</h2>
     <div class="presets" id="presets">
-      <div class="preset" data-w="1280" data-h="720" data-fps="60"><div class="res">720p</div><div class="fps">60fps</div><div class="note">最速・軽い</div></div>
+      <div class="preset" data-w="1280" data-h="720" data-fps="60"><div class="res">720p</div><div class="fps">60fps</div><div class="note">最速</div></div>
       <div class="preset sel" data-w="1920" data-h="1080" data-fps="60"><div class="res">1080p</div><div class="fps">60fps</div><div class="note">推奨</div></div>
-      <div class="preset" data-w="1920" data-h="1080" data-fps="120"><div class="res">1080p</div><div class="fps">120fps</div><div class="note">時間かかる</div></div>
-      <div class="preset off" title="ブラウザ(wasm単スレッド)では4Kは現実的でありません"><div class="res">4K</div><div class="fps">120fps</div><div class="note">exe版でどうぞ</div></div>
+      <div class="preset" data-w="1920" data-h="1080" data-fps="120"><div class="res">1080p</div><div class="fps">120fps</div><div class="note"></div></div>
+      <div class="preset" data-w="3840" data-h="2160" data-fps="120"><div class="res">4K</div><div class="fps">120fps</div><div class="note">GPU次第</div></div>
     </div>
     <div class="warn">
-      ⚠️ ブラウザ内レンダリングは<strong>単スレッドwasm</strong>なのでexe比でかなり遅めです（1080p60で30分〜1時間程度の目安）。<strong>4Kはexe版</strong>を使用してください。<br>
-      再現されるのは<b>カット編集（トリミング・並び）＋音声ミックス（BGM＋クリップ音声）</b>。Filmora独自のエフェクト・テキスト・ステッカー・トランジションは再現されません。<br>
-      PC（Chrome / Edge / Firefox）推奨。スマホはメモリ不足で落ちる可能性大。
+      ✅ 対応: カット編集（トリミング・並び）＋音声ミックス（BGM＋クリップ音声）。<br>
+      ⚠️ 非対応: Filmora独自のエフェクト・テキスト・ステッカー・トランジション。<br>
+      💻 動作環境: <b>Chrome / Edge（デスクトップ）推奨</b>。内蔵のAV1デコーダーとH.264エンコーダーを使います。スマホ・Safariは未検証。
     </div>
   </div>
 
   <div class="card hidden" id="renderCard">
     <h2>③ レンダリング</h2>
-    <button class="green big" id="startBtn">書き出し開始</button>
-    <button class="red hidden" id="cancelBtn" style="margin-top:8px">中止</button>
+    <button class="green" id="startBtn" style="width:100%">書き出し開始</button>
     <div class="bar"><div id="barFill"></div></div>
     <div class="status" id="prog">待機中</div>
-    <div class="log hidden" id="log"></div>
     <div class="hidden" id="result" style="margin-top:12px">
       <video id="player" controls playsinline preload="metadata"></video>
-      <div class="row">
-        <a id="dlLink" href="#" style="flex:1"><button class="green big">⬇️ MP4をダウンロード</button></a>
-      </div>
+      <a id="dlLink" href="#" style="display:block;margin-top:10px"><button class="green" style="width:100%">⬇️ MP4をダウンロード</button></a>
       <div class="status" style="margin-top:6px" id="resMeta"></div>
     </div>
   </div>
@@ -97,34 +90,33 @@
   <div class="card">
     <h2>ℹ️ 仕組み</h2>
     <div class="status">
-      分割アップロードされた31パート（<code>/files/*.bin</code>）を HTTP Range で必要分だけ取得してzip解析 →
-      <code>timeline.wesproj</code> のカット情報を解析 → 素材を抽出 → ffmpeg.wasm（ブラウザ内ffmpeg）で
-      セグメント化→連結→音声ミックス→書き出し、まで全部ブラウザ内で実行します。ファイルはどこにも送信されません。
-      ローカルモードなら手元の .wfpbundle を直接開けます（ページをダウンロードしてオフラインでも可）。
+      アップロードした .wfpbundle をブラウザ内でzip展開 → <code>timeline.wesproj</code> のカット情報を解析 →
+      素材（AV1/H.264）を <b>WebCodecs</b> でデコード → キャンバスでスケール → H.264に再エンコード →
+      音声は WebAudio でミックス → MP4に多重化。全工程ローカル実行・送信ゼロ。
+      中断してもセグメント（クリップ）単位で再開…はせず、最初からやり直しになります（ごめん！）。
     </div>
   </div>
 </div>
 
-<script src="vendor/ffmpeg.js"></script>
+<script src="vendor/mp4box.all.js"></script>
+<script src="vendor/mp4-muxer.js"></script>
 <script src="ziplite.js"></script>
+<script src="mp4desc.js"></script>
 <script>
 (function () {
   "use strict";
   const $ = (id) => document.getElementById(id);
-  const Z = ZipLite;
+  const Z = ZipLite, WM = WfpMP4;
 
   let src = null, entries = null, wsrc = null, wentries = null;
   let pinfo = null, mediaMap = null, parsed = null;
-  let ffmpeg = null, ffReady = false, running = false, cancelled = false;
-  let probeBuf = null, clipFrac = 0;
   let sel = { w: 1920, h: 1080, fps: 60 };
-  let objectUrl = null;
+  let running = false, objectUrl = null, actx = null;
 
-  const repoBtn = $("repoBtn"), fileBtn = $("fileBtn"), fileInput = $("fileInput");
+  const filebtn = $("filebtn"), filebtnText = $("filebtnText"), fileInput = $("fileInput");
   const srcStatus = $("srcStatus"), projCard = $("projCard"), projKv = $("projKv");
   const setCard = $("setCard"), renderCard = $("renderCard");
-  const startBtn = $("startBtn"), cancelBtn = $("cancelBtn");
-  const barFill = $("barFill"), prog = $("prog"), logBox = $("log");
+  const startBtn = $("startBtn"), barFill = $("barFill"), prog = $("prog");
   const result = $("result"), player = $("player"), dlLink = $("dlLink"), resMeta = $("resMeta");
 
   function esc(s) { return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
@@ -132,72 +124,58 @@
   function fmtDur(s) { const m = Math.floor(s / 60), r = Math.round(s % 60); return m + "分" + r + "秒"; }
   function setBar(f) { barFill.style.width = (Math.max(0, Math.min(1, f)) * 100).toFixed(1) + "%"; }
   function setProg(f, msg) { setBar(f); prog.innerHTML = msg; }
-  function logLine(s) {
-    logBox.classList.remove("hidden");
-    const lines = logBox.textContent.split("\n");
-    lines.push(s);
-    while (lines.length > 400) lines.shift();
-    logBox.textContent = lines.join("\n");
-    logBox.scrollTop = logBox.scrollHeight;
-  }
-  function extOf(name) { const m = name.match(/\.[a-z0-9]{1,5}$/i); return m ? m[0] : ".mp4"; }
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-  /* ---------- source loading ---------- */
-  repoBtn.addEventListener("click", async () => {
-    if (running) return;
-    try {
-      srcStatus.textContent = "manifest.json 取得中…";
-      const base = new URL("../files/", location.href).href;
-      const man = await (await fetch(base + "manifest.json", { cache: "no-store" })).json();
-      const names = man.parts.map((p) => p.file);
-      const sizes = man.parts.map((p) => p.size);
-      src = new Z.HttpPartSource(base, names, sizes, (b) => (srcStatus.textContent = "取得量: " + fmt(b) + "（解析中…）"));
-      await openAndParse(decodeURIComponent(man.originalName || "bundle"));
-      srcStatus.textContent = "読み込み完了（リポジトリの31パートから）";
-    } catch (e) { srcStatus.innerHTML = "❌ 読み込み失敗: <b>" + esc(e.message) + "</b>（file:// で開いている場合はローカルモードを使ってください）"; }
-  });
-
-  fileBtn.addEventListener("click", () => fileInput.click());
+  /* ---------- upload ---------- */
   fileInput.addEventListener("change", async function () {
     if (!this.files.length || running) return;
+    const f = this.files[0];
     try {
-      srcStatus.textContent = "読み込み中… " + fmt(this.files[0].size);
-      src = new Z.BlobSource([this.files[0]]);
-      await openAndParse(this.files[0].name);
-      srcStatus.textContent = "読み込み完了: " + this.files[0].name;
-    } catch (e) { srcStatus.innerHTML = "❌ 読み込み失敗: <b>" + esc(e.message) + "</b>"; }
+      srcStatus.textContent = "解析中… " + fmt(f.size);
+      src = new Z.BlobSource([f]);
+      entries = await Z.openZip(src);
+      const wfpName = [...entries.keys()].find((n) => n.toLowerCase().endsWith(".wfp"));
+      if (!wfpName) throw new Error(".wfp プロジェクトが見つかりません（Filmoraの .wfpbundle をアップロードしてください）");
+      const wfpBlob = await Z.extractEntry(src, entries, wfpName);
+      wsrc = new Z.BlobSource([wfpBlob]);
+      wentries = await Z.openZip(wsrc);
+      pinfo = JSON.parse(await (await Z.extractEntry(wsrc, wentries, "ProjectFolder/project_info.json")).text());
+      mediaMap = Z.mediaMapFromEntries([...entries.keys(), ...[...wentries.keys()].map((n) => n.replace(/^ProjectFolder\//, ""))]);
+      const tl = JSON.parse(await (await Z.extractEntry(wsrc, wentries, "ProjectFolder/Medias/" + pinfo.timeline_mediaId + "/timeline.wesproj")).text());
+      parsed = Z.parseTimeline(tl, mediaMap);
+      if (!parsed.videoClips.length) throw new Error("映像クリップが見つかりません");
+
+      filebtn.classList.add("has");
+      filebtnText.innerHTML = '<span class="name">📄 ' + esc(f.name) + "</span><br>" + fmt(f.size) + " を読み込み完了（タップで変更）";
+      projKv.innerHTML =
+        "<dt>プロジェクト</dt><dd>" + esc(pinfo.project_file_name || f.name) + "</dd>" +
+        "<dt>エディタ</dt><dd>" + esc(pinfo.project_editor_name + " " + pinfo.project_editor_modify_version) + "</dd>" +
+        "<dt>タイムライン</dt><dd>" + pinfo.project_timeline_resolution.join("×") + " @ " + (pinfo.project_timeline_framerate[0] / pinfo.project_timeline_framerate[1]) + "fps</dd>" +
+        "<dt>長さ</dt><dd>" + fmtDur(parsed.duration) + "</dd>" +
+        "<dt>映像クリップ</dt><dd>" + parsed.videoClips.length + " 本</dd>" +
+        "<dt>音声</dt><dd>" + parsed.audioClips.length + " トラック</dd>";
+      projCard.classList.remove("hidden");
+      setCard.classList.remove("hidden");
+      renderCard.classList.remove("hidden");
+      setProg(0, "読み込み完了。「書き出し開始」を押してください");
+      renderCard.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      srcStatus.textContent = "OK — 処理はすべてこのブラウザ内で行われます";
+    } catch (e) {
+      srcStatus.innerHTML = "❌ 読み込み失敗: <b>" + esc(e.message) + "</b>";
+      projCard.classList.add("hidden"); setCard.classList.add("hidden"); renderCard.classList.add("hidden");
+    }
     this.value = "";
   });
 
-  async function openAndParse(displayName) {
-    setProg(0.03, "zip目録読み取り中…");
-    entries = await Z.openZip(src);
-    const wfpName = [...entries.keys()].find((n) => n.toLowerCase().endsWith(".wfp"));
-    if (!wfpName) throw new Error(".wfp プロジェクトが見つかりません（Filmoraの .wfpbundle を指定してください）");
-    const wfpBlob = await Z.extractEntry(src, entries, wfpName);
-    wsrc = new Z.BlobSource([wfpBlob]);
-    wentries = await Z.openZip(wsrc);
-    pinfo = JSON.parse(await (await Z.extractEntry(wsrc, wentries, "ProjectFolder/project_info.json")).text());
-    mediaMap = Z.mediaMapFromEntries([...entries.keys(), ...[...wentries.keys()].map((n) => n.replace(/^ProjectFolder\//, ""))]);
-    const tl = JSON.parse(await (await Z.extractEntry(wsrc, wentries, "ProjectFolder/Medias/" + pinfo.timeline_mediaId + "/timeline.wesproj")).text());
-    parsed = Z.parseTimeline(tl, mediaMap);
-    if (!parsed.videoClips.length) throw new Error("映像クリップが見つかりません");
+  $("presets").addEventListener("click", (e) => {
+    const el = e.target.closest(".preset");
+    if (!el || running) return;
+    document.querySelectorAll(".preset").forEach((x) => x.classList.remove("sel"));
+    el.classList.add("sel");
+    sel = { w: +el.dataset.w, h: +el.dataset.h, fps: +el.dataset.fps };
+  });
 
-    projKv.innerHTML =
-      "<dt>プロジェクト</dt><dd>" + esc(pinfo.project_file_name || displayName) + "</dd>" +
-      "<dt>エディタ</dt><dd>" + esc(pinfo.project_editor_name + " " + pinfo.project_editor_modify_version) + "</dd>" +
-      "<dt>タイムライン</dt><dd>" + pinfo.project_timeline_resolution.join("×") + " @ " + (pinfo.project_timeline_framerate[0] / pinfo.project_timeline_framerate[1]) + "fps</dd>" +
-      "<dt>長さ</dt><dd>" + fmtDur(parsed.duration) + "</dd>" +
-      "<dt>映像クリップ</dt><dd>" + parsed.videoClips.length + " 本</dd>" +
-      "<dt>音声</dt><dd>" + parsed.audioClips.length + " トラック</dd>";
-    projCard.classList.remove("hidden");
-    setCard.classList.remove("hidden");
-    renderCard.classList.remove("hidden");
-    setProg(0, "読み込み完了。「書き出し開始」でレンダリング");
-    renderCard.scrollIntoView({ behavior: "smooth", block: "nearest" });
-  }
-
-  async function readMediaBlob(guid) {
+  async function mediaBlobFor(guid) {
     const m = mediaMap.get(guid);
     if (!m) return null;
     if (entries.has(m.entry)) return await Z.extractEntry(src, entries, m.entry);
@@ -206,153 +184,295 @@
     return null;
   }
 
-  /* ---------- ffmpeg.wasm ---------- */
-  async function ensureFfmpeg() {
-    if (ffReady) return;
-    setProg(0.01, "ffmpeg.wasm 読み込み中…（初回約32MB）");
-    ffmpeg = new FFmpegWASM.FFmpeg();
-    ffmpeg.on("log", ({ message }) => { if (probeBuf !== null) probeBuf.push(message); });
-    ffmpeg.on("progress", ({ progress }) => { if (running && Number.isFinite(progress)) clipFrac = Math.max(0, Math.min(1, progress)); });
-    await ffmpeg.load({ coreURL: "vendor/ffmpeg-core.js", wasmURL: "vendor/ffmpeg-core.wasm" });
-    ffReady = true;
+  /* ---------- demux one video track ---------- */
+  function demuxVideo(ab) {
+    return new Promise((resolve, reject) => {
+      const info = WM.inspect(ab);
+      const vt = info.tracks.find((t) => t.handler === "vide");
+      if (!vt) { reject(new Error("映像トラックがありません")); return; }
+      if (!vt.codec || !vt.description) { reject(new Error("対応しないコーデックです: " + vt.fourcc)); return; }
+      const file = MP4Box.createFile(false);
+      const samples = [];
+      file.onReady = (inf) => {
+        const t = inf.tracks.find((x) => x.video);
+        if (t) file.setExtractionOptions(t.id, null, { nbSamples: 10000 });
+      };
+      file.onSamples = (id, user, samps) => {
+        for (const s of samps) samples.push(s);
+      };
+      file.onError = (e) => reject(new Error("mp4解析エラー: " + e));
+      ab.fileStart = 0;
+      try {
+        file.start();
+        file.appendBuffer(ab);
+        file.flush();
+      } catch (e) { reject(e); return; }
+      resolve({ vt, samples, timescale: vt.timescale });
+    });
   }
 
-  async function hasAudioTrack(name) {
-    probeBuf = [];
-    try { await ffmpeg.exec(["-hide_banner", "-i", name]); } catch (e) {}
-    const txt = probeBuf.join("\n");
-    probeBuf = null;
-    return /Audio:/.test(txt);
+  /* ---------- per-clip video render ---------- */
+  async function renderClip(clip, mediaBlob, ctx, encoder, opts, progressCb) {
+    const ab = await mediaBlob.arrayBuffer();
+    const { vt, samples } = await demuxVideo(ab);
+    const ts = vt.timescale;
+    const usOf = (s) => Math.round((s.cts / ts) * 1e6);
+    const inUs = Math.round(clip.in * 1e6);
+    const outUs = Math.round(clip.out * 1e6);
+    const clipDurUs = outUs - inUs;
+    const tickUs = Math.round(1e6 / opts.fps);
+    const baseUs = Math.round(clip.tl * 1e6);
+
+    const cfg = { codec: vt.codec, codedWidth: vt.width, codedHeight: vt.height, description: vt.description };
+    const sup = await VideoDecoder.isConfigSupported(cfg);
+    if (!sup.supported) throw new Error("このブラウザは " + vt.codec + "（クリップ: " + clip.mediaName + "）のデコードに非対応です。Chrome / Edge でお試しください");
+
+    // letterbox geometry
+    const sw = vt.width || ctx.canvas.width, sh = vt.height || ctx.canvas.height;
+    const scale = Math.min(opts.w / sw, opts.h / sh);
+    const dw = Math.max(2, Math.round(sw * scale / 2) * 2), dh = Math.max(2, Math.round(sh * scale / 2) * 2);
+    const dx = (opts.w - dw) / 2, dy = (opts.h - dh) / 2;
+
+    let nextTick = 0; // relative µs
+    let held = false, err = null, emitted = 0;
+    const totalTicks = Math.max(1, Math.round(clipDurUs / tickUs));
+
+    const emitTick = () => {
+      const vf = new VideoFrame(ctx.canvas, { timestamp: baseUs + nextTick, duration: tickUs });
+      encoder.encode(vf, { keyFrame: nextTick === 0 || (baseUs + nextTick) % 2000000 === 0 });
+      vf.close();
+      nextTick += tickUs;
+      emitted++;
+      progressCb(emitted, totalTicks);
+    };
+    const draw = (f) => {
+      ctx.fillStyle = "#000";
+      ctx.fillRect(0, 0, opts.w, opts.h);
+      ctx.drawImage(f, dx, dy, dw, dh);
+    };
+
+    const decoder = new VideoDecoder({
+      output: (f) => {
+        if (err) { f.close(); return; }
+        try {
+          const l = f.timestamp - inUs;
+          if (l >= clipDurUs) { f.close(); return; }
+          if (l < -1000) { f.close(); return; }
+          if (!held) { draw(f); held = true; f.close(); return; }
+          while (nextTick < l && nextTick < clipDurUs) emitTick();
+          draw(f);
+          f.close();
+        } catch (e) { err = e; f.close(); }
+      },
+      error: (e) => { err = e; },
+    });
+    decoder.configure(cfg);
+
+    // start feeding from the last keyframe at/before the in-point
+    let start = 0;
+    for (let i = 0; i < samples.length; i++) {
+      if (samples[i].is_sync && usOf(samples[i]) <= inUs) start = i;
+    }
+    let fed = 0;
+    for (let i = start; i < samples.length; i++) {
+      if (err) break;
+      const s = samples[i];
+      const u = usOf(s);
+      if (u > outUs) break;
+      while (decoder.decodeQueueSize > 60) await sleep(0);
+      decoder.decode(new EncodedVideoChunk({
+        type: s.is_sync ? "key" : "delta",
+        timestamp: u,
+        duration: Math.round((s.duration / ts) * 1e6) || tickUs,
+        data: s.data,
+      }));
+      fed++;
+    }
+    if (!err) await decoder.flush();
+    decoder.close();
+    if (err) throw err;
+    while (nextTick < clipDurUs) emitTick(); // drain remaining ticks with the last held frame
+    return { emitted, fed };
   }
 
-  async function ffExists(name) {
-    try { await ffmpeg.readFile(name); return true; } catch (e) { return false; }
+  /* ---------- audio ---------- */
+  async function buildAudioMix() {
+    if (!parsed.audioClips.length) return null;
+    const sr = 48000;
+    const off = new OfflineAudioContext(2, Math.ceil((parsed.duration + 0.5) * sr), sr);
+    let scheduled = 0;
+    for (const c of parsed.audioClips) {
+      const blob = await mediaBlobFor(c.guid);
+      if (!blob) continue;
+      let buf;
+      try {
+        const ab = await blob.arrayBuffer();
+        buf = await actx.decodeAudioData(ab);
+      } catch (e) { continue; }
+      const s = off.createBufferSource();
+      s.buffer = buf;
+      s.start(Math.max(0, c.tl), Math.max(0, c.in), Math.max(0.01, c.out - c.in));
+      s.connect(off.destination);
+      scheduled++;
+    }
+    if (!scheduled) return null;
+    const rendered = await off.startRendering();
+    // soft limiter
+    for (let ch = 0; ch < rendered.numberOfChannels; ch++) {
+      const d = rendered.getChannelData(ch);
+      for (let i = 0; i < d.length; i++) {
+        const x = d[i];
+        if (x > 0.95) d[i] = 0.95 + Math.tanh((x - 0.95) * 8) * 0.05;
+        else if (x < -0.95) d[i] = -0.95 - Math.tanh((-x - 0.95) * 8) * 0.05;
+      }
+    }
+    return rendered;
   }
 
-  /* ---------- presets ---------- */
-  $("presets").addEventListener("click", (e) => {
-    const el = e.target.closest(".preset");
-    if (!el || el.classList.contains("off") || running) return;
-    document.querySelectorAll(".preset").forEach((x) => x.classList.remove("sel"));
-    el.classList.add("sel");
-    sel = { w: +el.dataset.w, h: +el.dataset.h, fps: +el.dataset.fps };
-  });
+  function encodeAudioToMuxer(buffer, muxer) {
+    return new Promise((resolve, reject) => {
+      const enc = new AudioEncoder({
+        output: (chunk, meta) => muxer.addAudioChunk(chunk, meta),
+        error: (e) => reject(e),
+      });
+      enc.configure({ codec: "opus", sampleRate: 48000, numberOfChannels: 2, bitrate: 192000 });
+      const N = 4096;
+      const total = buffer.length;
+      const L = buffer.getChannelData(0);
+      const R = buffer.numberOfChannels > 1 ? buffer.getChannelData(1) : L;
+      let pos = 0;
+      const step = () => {
+        if (pos >= total) {
+          enc.flush().then(() => { enc.close(); resolve(); }).catch(reject);
+          return;
+        }
+        const n = Math.min(N, total - pos);
+        const data = new Float32Array(n * 2);
+        data.set(L.subarray(pos, pos + n), 0);
+        data.set(R.subarray(pos, pos + n), n);
+        enc.encode(new AudioData({
+          format: "f32-planar", sampleRate: 48000, numberOfFrames: n, numberOfChannels: 2,
+          timestamp: Math.round((pos / 48000) * 1e6), data,
+        }));
+        pos += n;
+        setTimeout(step, 0);
+      };
+      step();
+    });
+  }
 
-  /* ---------- render ---------- */
+  /* ---------- encoder choice ---------- */
+  function videoEncoderConfig(w, h, fps) {
+    const big = w * h > 1920 * 1080;
+    const codec = big ? (fps > 60 ? "avc1.640034" : "avc1.640033") : (fps > 60 ? "avc1.4d4033" : "avc1.4d402a");
+    const bitrate = big ? (fps > 60 ? 90e6 : 55e6) : (w >= 1920 ? (fps > 60 ? 20e6 : 12e6) : 8e6);
+    return { codec, width: w, height: h, bitrate, framerate: fps, latencyMode: "quality", avc: { format: "avc" } };
+  }
+
+  /* ---------- main ---------- */
   startBtn.addEventListener("click", () => render().catch((e) => {
-    running = false; startBtn.disabled = false; cancelBtn.classList.add("hidden");
-    setProg(1, (cancelled ? "⏹ 中止しました" : "❌ エラー: <b>" + esc(e.message) + "</b>") + " — 再開するとセグメントから続行できます");
+    running = false;
+    startBtn.disabled = false;
+    setProg(1, "❌ エラー: <b>" + esc(e.message || String(e)) + "</b>");
   }));
-  cancelBtn.addEventListener("click", () => {
-    cancelled = true;
-    try { ffmpeg.terminate(); } catch (e) {}
-    ffReady = false;
-  });
 
   async function render() {
     if (!parsed || running) return;
-    cancelled = false; running = true;
-    startBtn.disabled = true; cancelBtn.classList.remove("hidden");
+    if (typeof VideoEncoder === "undefined" || typeof VideoDecoder === "undefined") {
+      throw new Error("このブラウザは WebCodecs 非対応です。デスクトップの Chrome / Edge でお試しください");
+    }
+    running = true;
+    startBtn.disabled = true;
     result.classList.add("hidden");
-    await ensureFfmpeg();
 
     const { w, h, fps } = sel;
+    const encCfg = videoEncoderConfig(w, h, fps);
+    const sup = await VideoEncoder.isConfigSupported(encCfg);
+    if (!sup.supported) throw new Error("H.264エンコード設定が非対応です (" + encCfg.codec + ")。解像度/fpsを下げてみてください");
+
+    let audioOK = false;
+    if (typeof AudioEncoder !== "undefined") {
+      try { audioOK = (await AudioEncoder.isConfigSupported({ codec: "opus", sampleRate: 48000, numberOfChannels: 2 })).supported; } catch (e) {}
+    }
+    actx = actx || new AudioContext();
+
+    // pre-extract all needed media (blobs are disk-backed, ok)
+    setProg(0.02, "素材を展開中…");
+    const guids = new Set([...parsed.videoClips, ...parsed.audioClips].map((c) => c.guid));
+    const blobs = new Map();
+    let i = 0;
+    for (const g of guids) {
+      const b = await mediaBlobFor(g);
+      if (b) blobs.set(g, b);
+      setProg(0.02 + 0.08 * (++i / guids.size), "素材を展開中… " + i + "/" + guids.size);
+    }
+
+    const canvas = new OffscreenCanvas(w, h);
+    const ctx = canvas.getContext("2d");
+    ctx.fillStyle = "#000"; ctx.fillRect(0, 0, w, h);
+
+    const muxer = new Mp4Muxer.Muxer({
+      target: new Mp4Muxer.ArrayBufferTarget(),
+      video: { codec: "avc", width: w, height: h, frameRate: fps },
+      audio: audioOK ? { codec: "opus", numberOfChannels: 2, sampleRate: 48000 } : undefined,
+      fastStart: "in-memory",
+    });
+    let encErr = null;
+    const encoder = new VideoEncoder({
+      output: (chunk, meta) => { try { muxer.addVideoChunk(chunk, meta); } catch (e) { encErr = e; } },
+      error: (e) => { encErr = e; },
+    });
+    encoder.configure(encCfg);
+
     const clips = parsed.videoClips;
-    const vf = "scale=" + w + ":" + h + ":force_original_aspect_ratio=decrease:flags=lanczos,pad=" + w + ":" + h + ":(ow-iw)/2:(oh-ih)/2,fps=" + fps;
-    const segNames = [];
+    let totalFrames = 0;
+    for (let ci = 0; ci < clips.length; ci++) {
+      const c = clips[ci];
+      const blob = blobs.get(c.guid);
+      if (!blob) throw new Error("素材が見つかりません: " + c.mediaName);
+      const r = await renderClip(c, blob, ctx, encoder, { w, h, fps }, (emitted, total) => {
+        setProg(0.1 + 0.7 * ((ci + emitted / Math.max(1, total)) / clips.length),
+          "クリップ " + (ci + 1) + "/" + clips.length + "（" + esc(c.mediaName.slice(0, 28)) + "…）フレーム " + emitted + "/" + total);
+      });
+      totalFrames += r.emitted;
+      if (encErr) throw encErr;
+      while (encoder.encodeQueueSize > 0) await sleep(10);
+    }
+    setProg(0.82, "映像エンコード完了（" + totalFrames + "フレーム）… フラッシュ中");
+    await encoder.flush();
+    encoder.close();
 
-    for (let i = 0; i < clips.length; i++) {
-      if (cancelled) throw new Error("cancelled");
-      const c = clips[i];
-      const seg = "seg" + String(i).padStart(3, "0") + ".mp4";
-      segNames.push(seg);
-      if (await ffExists(seg)) continue; // resume
-      const m = mediaMap.get(c.guid);
-      const blob = await readMediaBlob(c.guid);
-      if (!blob) throw new Error("媒体が見つかりません: " + (m ? m.name : c.guid));
-      const inName = "in_" + c.guid.slice(1, 9) + extOf(m.name);
-      setProg(0.03 + 0.74 * i / clips.length, "クリップ " + (i + 1) + "/" + clips.length + " 素材展開中…");
-      await ffmpeg.writeFile(inName, new Uint8Array(await blob.arrayBuffer()));
-      clipFrac = 0;
-      const timer = setInterval(() => setProg(0.03 + 0.74 * (i + clipFrac) / clips.length,
-        "クリップ " + (i + 1) + "/" + clips.length + " エンコード中… <b>" + Math.round(clipFrac * 100) + "%</b>"), 500);
+    let audioNote = "音声なし";
+    if (audioOK) {
+      setProg(0.85, "音声ミックス中（BGM＋クリップ音）…");
       try {
-        const rc = await ffmpeg.exec(["-hide_banner", "-y",
-          "-ss", c.in.toFixed(3), "-t", (c.out - c.in).toFixed(3), "-i", inName,
-          "-map", "0:v:0", "-map", "0:a:0?",
-          "-vf", vf,
-          "-c:v", "libx264", "-preset", "veryfast", "-crf", "19", "-pix_fmt", "yuv420p",
-          "-c:a", "aac", "-b:a", "192k", "-ar", "44100", "-ac", "2",
-          "-t", (c.tlend - c.tl).toFixed(3), seg]);
-        if (rc !== 0) throw new Error("セグメント " + (i + 1) + " エンコード失敗 (exit " + rc + ")");
-      } finally { clearInterval(timer); }
-      await ffmpeg.deleteFile(inName);
+        const mix = await buildAudioMix();
+        if (mix) {
+          setProg(0.92, "音声エンコード中…");
+          await encodeAudioToMuxer(mix, muxer);
+          audioNote = "音声あり(Opus)";
+        }
+      } catch (e) { audioNote = "音声処理に失敗: " + (e.message || e); }
     }
 
-    if (cancelled) throw new Error("cancelled");
-    setProg(0.79, "映像連結中…");
-    await ffmpeg.writeFile("list.txt", new TextEncoder().encode(segNames.map((s) => "file '" + s + "'").join("\n")));
-    let rc = await ffmpeg.exec(["-hide_banner", "-y", "-f", "concat", "-safe", "0", "-i", "list.txt", "-c", "copy", "video.mp4"]);
-    if (rc !== 0) throw new Error("連結失敗 (exit " + rc + ")");
-
-    setProg(0.85, "音声ミックス中…");
-    const audioInputs = [];
-    const staged = [];
-    for (const c of parsed.audioClips) {
-      const j = clips.findIndex((v) => v.guid === c.guid && Math.abs(v.in - c.in) < 0.02 && Math.abs(v.out - c.out) < 0.02);
-      if (j >= 0 && (await ffExists(segNames[j]))) { audioInputs.push({ name: segNames[j], c, isSeg: true }); continue; }
-      const blob = await readMediaBlob(c.guid);
-      if (!blob) continue;
-      const m = mediaMap.get(c.guid);
-      const name = "aud_" + audioInputs.length + extOf(m.name);
-      await ffmpeg.writeFile(name, new Uint8Array(await blob.arrayBuffer()));
-      if (!(await hasAudioTrack(name))) { await ffmpeg.deleteFile(name); continue; }
-      staged.push(name);
-      audioInputs.push({ name, c, isSeg: false });
-    }
-
+    setProg(0.97, "MP4書き出し中…");
+    muxer.finalize();
+    const outBlob = new Blob([muxer.target.buffer], { type: "video/mp4" });
     const safeName = (pinfo.project_file_name || "output").replace(/[^\w\-_.]+/g, "_").slice(0, 40);
     const outName = safeName + "_" + w + "x" + h + "@" + fps + ".mp4";
-
-    if (audioInputs.length) {
-      const args = ["-hide_banner", "-y"];
-      const fc = [];
-      audioInputs.forEach((ai, idx) => {
-        args.push("-i", ai.name);
-        const delay = Math.round(Math.max(0, ai.c.tl) * 1000);
-        const trim = ai.isSeg ? "" : "atrim=start=" + ai.c.in.toFixed(3) + ":end=" + ai.c.out.toFixed(3) + ",asetpts=PTS-STARTPTS,";
-        fc.push("[" + idx + ":a]" + trim + "adelay=" + delay + "|" + delay + "[a" + idx + "]");
-      });
-      fc.push(audioInputs.map((_, i) => "[a" + i + "]").join("") +
-        "amix=inputs=" + audioInputs.length + ":normalize=0:dropout_transition=0,alimiter=limit=0.95," +
-        "aformat=sample_fmts=fltp:sample_rates=44100:channel_layouts=stereo[aout]");
-      args.push("-filter_complex", fc.join(";"), "-map", "[aout]", "-c:a", "aac", "-b:a", "256k",
-        "-t", (parsed.duration + 0.5).toFixed(3), "audio.m4a");
-      rc = await ffmpeg.exec(args);
-      if (rc !== 0) throw new Error("音声ミックス失敗 (exit " + rc + ")");
-      setProg(0.95, "最終書き出し中…");
-      rc = await ffmpeg.exec(["-hide_banner", "-y", "-i", "video.mp4", "-i", "audio.m4a",
-        "-map", "0:v:0", "-map", "1:a:0", "-c", "copy", "-movflags", "+faststart", "-shortest", outName]);
-      if (rc !== 0) throw new Error("mux失敗 (exit " + rc + ")");
-    } else {
-      rc = await ffmpeg.exec(["-hide_banner", "-y", "-i", "video.mp4", "-c", "copy", "-movflags", "+faststart", outName]);
-      if (rc !== 0) throw new Error("書き出し失敗 (exit " + rc + ")");
-    }
-
-    const data = await ffmpeg.readFile(outName);
-    const blob = new Blob([data.buffer], { type: "video/mp4" });
     if (objectUrl) URL.revokeObjectURL(objectUrl);
-    objectUrl = URL.createObjectURL(blob);
+    objectUrl = URL.createObjectURL(outBlob);
     player.src = objectUrl;
     dlLink.href = objectUrl;
     dlLink.download = outName;
-    resMeta.textContent = outName + " ・ " + fmt(blob.size) + " ・ " + w + "×" + h + "@" + fps;
+    resMeta.textContent = outName + " ・ " + fmt(outBlob.size) + " ・ " + w + "×" + h + "@" + fps + " ・ " + audioNote;
     result.classList.remove("hidden");
     result.scrollIntoView({ behavior: "smooth", block: "nearest" });
     setProg(1, "✅ 完了！");
-    // free wasm heap (keep output only)
-    for (const n of [...segNames, "video.mp4", "audio.m4a", ...staged, "list.txt"]) { try { await ffmpeg.deleteFile(n); } catch (e) {} }
-    running = false; startBtn.disabled = false; cancelBtn.classList.add("hidden");
+    try { actx.close(); } catch (e) {}
+    actx = null;
+    running = false;
+    startBtn.disabled = false;
   }
 })();
 </script>
