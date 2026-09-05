@@ -80,6 +80,7 @@
     <button class="green" id="startBtn" style="width:100%">書き出し開始</button>
     <div class="bar"><div id="barFill"></div></div>
     <div class="status" id="prog">待機中</div>
+    <pre class="log hidden" id="miniLog"></pre>
     <div class="hidden" id="result" style="margin-top:12px">
       <video id="player" controls playsinline preload="metadata"></video>
       <a id="dlLink" href="#" style="display:block;margin-top:10px"><button class="green" style="width:100%">⬇️ MP4をダウンロード</button></a>
@@ -132,6 +133,27 @@
   function fmtDur(s) { const m = Math.floor(s / 60), r = Math.round(s % 60); return m + "分" + r + "秒"; }
   function setBar(f) { barFill.style.width = (Math.max(0, Math.min(1, f)) * 100).toFixed(1) + "%"; }
   function setProg(f, msg) { setBar(f); prog.innerHTML = msg; }
+  const miniLog = $("miniLog");
+  function phase(msg) {
+    miniLog.classList.remove("hidden");
+    const line = "[" + new Date().toTimeString().slice(0, 8) + "] " + msg;
+    const lines = miniLog.textContent.split("\n");
+    lines.push(line);
+    while (lines.length > 120) lines.shift();
+    miniLog.textContent = lines.join("\n");
+    miniLog.scrollTop = miniLog.scrollHeight;
+  }
+  function withTimeout(p, ms, label) {
+    return Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error(label || "タイムアウト")), ms))]);
+  }
+  async function waitEncoderDrain(enc, ms) {
+    const t0 = Date.now();
+    while (enc.encodeQueueSize > 0 && enc.state === "configured") {
+      if (Date.now() - t0 > ms) { phase("⚠ エンコーダー排出が止まっています（続行）"); return false; }
+      await sleep(20);
+    }
+    return true;
+  }
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
   /* ---------- upload ---------- */
@@ -414,7 +436,7 @@
       }
     }
     if (!firstErr && decoder.state === "configured") {
-      try { await decoder.flush(); } catch (e) { if (!firstErr) firstErr = e; }
+      try { await withTimeout(decoder.flush(), 30000, "デコーダーflushタイムアウト"); } catch (e) { if (!firstErr) firstErr = e; }
     }
     feedDone = true;
     await drain;
@@ -432,8 +454,9 @@
     return { emitted };
   }
 
-  /* ---------- 互換モード: <video>要素からseekで取得（WebCodecsが使えない場合） ---------- */
+  /* ---------- 互換モード: <video>要素を再生してキャプチャ（WebCodecsが使えない場合） ---------- */
   async function renderClipViaVideoElement(clip, mediaBlob, ctx, encoder, opts, progressCb) {
+    phase("互換モード開始: " + clip.mediaName.slice(0, 36));
     const url = URL.createObjectURL(mediaBlob);
     const v = document.createElement("video");
     v.muted = true;
@@ -441,67 +464,100 @@
     v.preload = "auto";
     v.src = url;
     try {
-      await new Promise((res, rej) => {
+      await withTimeout(new Promise((res, rej) => {
+        if (v.readyState >= 1) return res();
         const t = setTimeout(() => rej(new Error("動画の読み込みタイムアウト")), 20000);
         v.addEventListener("loadedmetadata", () => { clearTimeout(t); res(); }, { once: true });
         v.addEventListener("error", () => {
           clearTimeout(t);
-          rej(new Error("この端末ではこの素材を再生できません（AV1非対応の可能性: iPhone 15 Proより前はAV1ハードウェアデコードがありません）→ PC版 Chrome/Edge または exe版をご利用ください"));
+          rej(new Error("この端末ではこの素材を再生できません（コーデック非対応の可能性）→ PC版 Chrome/Edge または exe版をご利用ください"));
         }, { once: true });
-      });
+      }), 25000, "動画の読み込みタイムアウト");
+      phase("読込OK (" + (v.videoWidth || "?") + "x" + (v.videoHeight || "?") + ") 再生可能時間 " + v.duration.toFixed(1) + "s");
+
       const sw = v.videoWidth || 1280, sh = v.videoHeight || 720;
       const scale = Math.min(opts.w / sw, opts.h / sh);
       const dw = Math.max(2, Math.round(sw * scale / 2) * 2), dh = Math.max(2, Math.round(sh * scale / 2) * 2);
       const dx = (opts.w - dw) / 2, dy = (opts.h - dh) / 2;
-      const inUs = Math.round(clip.in * 1e6), outUs = Math.round(clip.out * 1e6);
-      const clipDurUs = outUs - inUs;
-      const tickUs = Math.round(1e6 / opts.fps);
-      const baseUs = Math.round(clip.tl * 1e6);
-      const stepUs = Math.round(1e6 / 60); // ソースは60fps前提でサンプリング
-      let nextTick = 0, emitted = 0;
-      const totalTicks = Math.max(1, Math.round(clipDurUs / tickUs));
-      // iOSはデータ遅延読み込みがあるので、seek後にフレーム準備完了まで待つ
-      const seekTo = (sec) => new Promise((res, rej) => {
-        const t = setTimeout(() => { v.removeEventListener("seeked", on); rej(new Error("シークタイムアウト")); }, 12000);
-        const ready = () => {
-          if (v.readyState >= 2) { clearTimeout(t); res(); }
-          else {
-            const t2 = setTimeout(() => { clearTimeout(t); res(); }, 3000); // フレーム来なくても諦めて進む
-            v.addEventListener("canplay", () => { clearTimeout(t2); clearTimeout(t); res(); }, { once: true });
-          }
-        };
-        const on = () => { v.removeEventListener("seeked", on); ready(); };
-        v.addEventListener("seeked", on, { once: true });
-        try { v.currentTime = sec; } catch (e) { clearTimeout(t); rej(e); }
-      });
-      // iOSでデータを先に読み込ませる（無音なので自動再生制限にかからない）
-      try { await v.play(); v.pause(); } catch (e) {}
       const draw = () => {
         ctx.fillStyle = "#000";
         ctx.fillRect(0, 0, opts.w, opts.h);
-        ctx.drawImage(v, dx, dy, dw, dh);
+        try { ctx.drawImage(v, dx, dy, dw, dh); } catch (e) {}
       };
+      const tick = 1 / opts.fps;
+      const clipDur = clip.out - clip.in;
+      const baseUs = Math.round(clip.tl * 1e6);
+      const tickUs = Math.round(1e6 / opts.fps);
+      let nTicks = 0;
+      const totalTicks = Math.max(1, Math.round(clipDur / tick));
       const emitTick = () => {
-        const vf = new VideoFrame(ctx.canvas, { timestamp: baseUs + nextTick, duration: tickUs });
-        encoder.encode(vf, { keyFrame: nextTick === 0 });
+        const vf = new VideoFrame(ctx.canvas, { timestamp: baseUs + nTicks * tickUs, duration: tickUs });
+        encoder.encode(vf, { keyFrame: nTicks === 0 });
         vf.close();
-        nextTick += tickUs;
-        emitted++;
+        nTicks++;
       };
-      for (let t = 0; t < clipDurUs; t += stepUs) {
-        await seekTo(Math.min(inUs + t, outUs - 4000) / 1e6 + 0.0005);
-        draw();
-        while (nextTick < t + stepUs && nextTick < clipDurUs) {
-          emitTick();
-          while (encoder.encodeQueueSize > 24) await sleep(2);
+
+      // in点へシーク
+      v.currentTime = Math.min(clip.in, Math.max(0, v.duration - 0.05));
+      await withTimeout(new Promise((res) => {
+        if (v.readyState >= 2) return res();
+        const to = setTimeout(res, 12000);
+        v.addEventListener("seeked", function on() {
+          v.removeEventListener("seeked", on);
+          if (v.readyState >= 2) { clearTimeout(to); res(); }
+          else {
+            const t2 = setTimeout(() => { clearTimeout(to); res(); }, 3000);
+            v.addEventListener("canplay", () => { clearTimeout(t2); clearTimeout(to); res(); }, { once: true });
+          }
+        }, { once: true });
+      }), 15000, "シークタイムアウト");
+      draw();
+      phase("シーク完了 t=" + v.currentTime.toFixed(2) + "s — 再生キャプチャ開始");
+
+      // 再生してリアルタイムキャプチャ（失敗したらシークステップにフォールバック）
+      let playing = false;
+      try { await withTimeout(v.play(), 5000, "playタイムアウト"); playing = true; } catch (e) { playing = false; }
+
+      if (playing) {
+        const raf = () => new Promise((r) => requestAnimationFrame(r));
+        while (!v.ended && !v.paused && v.currentTime < clip.out - 0.004) {
+          const elapsed = v.currentTime - clip.in;
+          draw();
+          while (nTicks < elapsed / tick && nTicks < totalTicks) {
+            emitTick();
+            if (encoder.encodeQueueSize > 24) await sleep(2);
+          }
+          progressCb(Math.min(nTicks, totalTicks), totalTicks);
+          await raf();
         }
-        progressCb(emitted, totalTicks);
+        try { v.pause(); } catch (e) {}
+        phase("再生キャプチャ終了 " + nTicks + "/" + totalTicks + "フレーム");
+      } else {
+        phase("再生開始できず — シークステップモードで実行（低速）");
+        const step = 1 / 60;
+        for (let t = 0; t < clipDur; t += step) {
+          const target = Math.min(clip.in + t, clip.out - 0.004);
+          await withTimeout(new Promise((res, rej) => {
+            const to = setTimeout(() => rej(new Error("シークタイムアウト")), 10000);
+            v.addEventListener("seeked", () => { clearTimeout(to); res(); }, { once: true });
+            try { v.currentTime = target + 0.0005; } catch (e) { clearTimeout(to); rej(e); }
+          }), 12000, "シークタイムアウト");
+          if (v.readyState < 2) await sleep(60);
+          draw();
+          while (nTicks < t + step && nTicks < totalTicks) {
+            emitTick();
+            if (encoder.encodeQueueSize > 24) await sleep(2);
+          }
+          progressCb(Math.min(nTicks, totalTicks), totalTicks);
+        }
       }
-      while (nextTick < clipDurUs) {
+      // 残りtickは最後のフレームで補完
+      while (nTicks < totalTicks) {
         emitTick();
-        while (encoder.encodeQueueSize > 24) await sleep(2);
+        if (encoder.encodeQueueSize > 24) await sleep(2);
       }
-      return { emitted };
+      phase("クリップ完了 " + nTicks + "フレーム");
+      return { emitted: nTicks };
     } finally {
       try { v.pause(); v.removeAttribute("src"); v.load(); } catch (e) {}
       URL.revokeObjectURL(url);
@@ -683,19 +739,22 @@
           "クリップ " + (ci + 1) + "/" + clips.length + "（" + esc(c.mediaName.slice(0, 28)) + "…）フレーム " + emitted + "/" + total);
       };
       let r;
+      phase("クリップ " + (ci + 1) + "/" + clips.length + " 開始: " + c.mediaName.slice(0, 36));
       try {
         r = await renderClip(c, blob, ctx, encoder, { w, h, fps }, pcb, fallbackCodecs);
       } catch (e) {
         if (!e || !e.useFallback) throw e;
-        // 互換モードで同じクリップを再処理
+        phase("→ WebCodecs失敗のため互換モードへ: " + (e.message || "").slice(0, 80));
         r = await renderClipViaVideoElement(c, blob, ctx, encoder, { w, h, fps }, pcb);
       }
       totalFrames += r.emitted;
       if (encErr) throw encErr;
-      while (encoder.encodeQueueSize > 0) await sleep(10);
+      phase("クリップ " + (ci + 1) + " 完了 — エンコーダー排出待ち");
+      await waitEncoderDrain(encoder, 90000);
     }
+    phase("全クリップ完了 " + totalFrames + "フレーム — エンコーダーflush");
     setProg(0.82, "映像エンコード完了（" + totalFrames + "フレーム）… フラッシュ中");
-    await encoder.flush();
+    await withTimeout(encoder.flush(), 120000, "エンコーダーflushタイムアウト");
     encoder.close();
 
     let audioNote = "音声なし";
