@@ -1,0 +1,106 @@
+{
+ "label": "4K120",
+ "originalName": "output.mp4",
+ "totalSize": 1273310451,
+ "chunkSize": 67108864,
+ "totalParts": 19,
+ "contentType": "video/mp4",
+ "codecs": "video/mp4; codecs=\"avc1.640034, mp4a.40.2\"",
+ "parts": [
+  {
+   "file": "video.part001.bin",
+   "size": 67108864,
+   "sha256": "b12b00d4a750548840c88facc094365a032909bea6d65842ef9b0a8296caf5e4"
+  },
+  {
+   "file": "video.part002.bin",
+   "size": 67108864,
+   "sha256": "56656b3c3b8a5d034e56f38ff147bdd80b4f7fdf8ab4bf820de11977edc05a64"
+  },
+  {
+   "file": "video.part003.bin",
+   "size": 67108864,
+   "sha256": "94049748acad1e1cdf7cb70f8c546247cf17716b0721191aabf543cf7f008da3"
+  },
+  {
+   "file": "video.part004.bin",
+   "size": 67108864,
+   "sha256": "f50fcac58195022931d1938b7d8b708e69d72dbe9a9e9f1a2eeb1389a50cf136"
+  },
+  {
+   "file": "video.part005.bin",
+   "size": 67108864,
+   "sha256": "1d84e147087b2b5b691b3a1b7984487293a189b7434a754f87c37171a2c0ee67"
+  },
+  {
+   "file": "video.part006.bin",
+   "size": 67108864,
+   "sha256": "26f7d20c49053c8fc8f4beda488560a554105b097eeece6b2f20580445ca1611"
+  },
+  {
+   "file": "video.part007.bin",
+   "size": 67108864,
+   "sha256": "56c13bf12e7d1d80c68cb005aa1d5e4c55918f0b80439ea122feb1580e8cc0f8"
+  },
+  {
+   "file": "video.part008.bin",
+   "size": 67108864,
+   "sha256": "39109d29a05319098df575cab13766ac4ea7dc07634cf412e87f23cfa799f707"
+  },
+  {
+   "file": "video.part009.bin",
+   "size": 67108864,
+   "sha256": "b26cdb13780be0378f96e631de4865d122e01076e68bb6fe5aaa4b8726265cad"
+  },
+  {
+   "file": "video.part010.bin",
+   "size": 67108864,
+   "sha256": "b9b6c0792287a5c36959225e713468811960262e3f142df3f3669abe8ef77771"
+  },
+  {
+   "file": "video.part011.bin",
+   "size": 67108864,
+   "sha256": "261bdaaf2d1ab8062386c0901f7806b4651938b85eaef3444bbfe89c818057d4"
+  },
+  {
+   "file": "video.part012.bin",
+   "size": 67108864,
+   "sha256": "af3392648b9cfe2e9a5e16f21d63f4df2b4b09724824e95611ca1daaa55680dd"
+  },
+  {
+   "file": "video.part013.bin",
+   "size": 67108864,
+   "sha256": "8aed93a04af29c0b16ef950afc599f38b020603ebd9c1f0e3d2eef9b56095c93"
+  },
+  {
+   "file": "video.part014.bin",
+   "size": 67108864,
+   "sha256": "6a1417d09e32929f18ffeb55b368ce9e2bd48fff16e564edcd425f1bba56de9c"
+  },
+  {
+   "file": "video.part015.bin",
+   "size": 67108864,
+   "sha256": "fedeecd8a1b950762ac5fff3bbe8d20ee4013054570eac2ea88550ff3175af9e"
+  },
+  {
+   "file": "video.part016.bin",
+   "size": 67108864,
+   "sha256": "878fc21a611a6c17ef8331b04cfb36d3cab2fa647ecb91bd4acaa5fb1553bec9"
+  },
+  {
+   "file": "video.part017.bin",
+   "size": 67108864,
+   "sha256": "b6a94636bffef8a785a4924ee623c8d7430674577129ce3b1a112a5809418ef0"
+  },
+  {
+   "file": "video.part018.bin",
+   "size": 67108864,
+   "sha256": "761db042b60476800528cff22892b899aa59f6278c5d84e7025a9d2f4b3acef3"
+  },
+  {
+   "file": "video.part019.bin",
+   "size": 65350899,
+   "sha256": "20fd5505d7b48b610214f485a37a2d5154c0c8e63cc4864e3bcf68cf712dcbbd"
+  }
+ ]
+}
