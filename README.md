@@ -13,6 +13,14 @@
 - 720p60 / 1080p60 / 1080p120 / 4K120（GPUエンコード）
 - デスクトップChrome / Edge 推奨
 
+## 🍿 完成動画を視聴（Pages・分割結合ストリーミング）
+
+**https://ifuto.github.io/wfp-1/web/watch.html**
+
+- 4K 120fps（1.27GB・19パート）と 1080p 60fps（469MB・7パート）を `.bin` 分割でリポジトリに格納
+- MediaSource 対応環境は取得しながら再生開始、非対応は全取得後に Blob 再生
+- パート毎に SHA-256 検証、MP4ダウンロード/保存ボタン付き
+
 ## 🖥️ exe版（4K120対応・速い・推奨）
 
 [`dist/wfp-render.exe`](https://github.com/ifuto/wfp-1/raw/arena/01a07073-wfp-1/dist/wfp-render.exe)
@@ -32,7 +40,8 @@ Filmora独自のエフェクト・テキスト・ステッカー・トランジ�
 
 ## リポジトリ構成
 - `files/` — 分割アップロードされた31パート＋manifest.json（検証記録: VERIFY.md）
-- `web/` — GitHub Pages Web版（ziplite.js / ffmpeg.wasm vendor 同梱）
+- `web/` — GitHub Pages Web版（ziplite.js / 視聴ページ watch.html）
+- `video/` — レンダー済み動画の分割パート（4k120: 19部 / 1080p60: 7部）
 - `tools/exe/` — exe版ソース＋ビルドスクリプト（Bunクロスコンパイル）
 - `tools/uploader/` — サンドボックス内アップロード受付サーバー（チャット制限回避用）
 - `tools/render/` — サンドボックス内レンダラー（サーバー側ffmpeg）
