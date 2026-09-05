@@ -1,5 +1,6 @@
 #!/bin/bash
 # Build dist/wfp-render.exe (Windows x64) from Linux via Bun cross-compile.
+# ziplite.js is shared with the web app (single source of truth: web/ziplite.js).
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -8,9 +9,8 @@ if [ ! -x node_modules/.bin/bun ]; then
   npm i --no-audit --no-fund bun
 fi
 
-# single-file bundle: ziplite (UMD) + bridge + app (strip app shebang)
 {
-  cat ziplite.js
+  cat ../../web/ziplite.js
   echo ';globalThis.__ZIPLITE__ = (typeof module !== "undefined" && module.exports) || ZipLite;'
   echo ';module.exports = undefined;'
   tail -n +2 app.js
