@@ -71,6 +71,14 @@ function resetAll() {
 
 function partPath(i) { return path.join(PARTS, "part_" + String(i).padStart(6, "0")); }
 
+/* name -> .wfpbundle name: "X.wfpbundle.zip" (already a bundled zip) just
+   strips ".zip"; plain "X.zip" becomes "X.wfpbundle". */
+function bundleNameFor(name) {
+  if (/\.wfpbundle\.zip$/i.test(name)) return name.replace(/\.zip$/i, "");
+  if (/\.zip$/i.test(name)) return name.replace(/\.zip$/i, ".wfpbundle");
+  return name + ".wfpbundle";
+}
+
 /* ---- assemble parts -> original name, then create .wfpbundle twin ---- */
 async function assemble(session) {
   const original = path.join(DIR, session.name);
@@ -92,9 +100,7 @@ async function assemble(session) {
   if (stat.size !== session.size) throw new Error("size mismatch after assembly: " + stat.size + " != " + session.size);
 
   // .zip -> .wfpbundle (hard link so we don't double 771MB on disk; fall back to copy)
-  let bundleName;
-  if (/\.zip$/i.test(session.name)) bundleName = session.name.replace(/\.zip$/i, ".wfpbundle");
-  else bundleName = session.name + ".wfpbundle";
+  const bundleName = bundleNameFor(session.name);
   const bundle = path.join(DIR, bundleName);
   try { fs.unlinkSync(bundle); } catch {}
   try { fs.linkSync(original, bundle); }
@@ -198,13 +204,16 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === "GET" && p === "/download") {
       const s = readSession();
-      const bundleName = s && /\.zip$/i.test(s.name) ? s.name.replace(/\.zip$/i, ".wfpbundle") : (s ? s.name + ".wfpbundle" : null);
+      const bundleName = s ? bundleNameFor(s.name) : null;
       const file = bundleName ? path.join(DIR, bundleName) : null;
       if (!file || !fs.existsSync(file)) { json(res, 404, { ok: false, error: "bundle not found" }); return; }
+      const asciiFallback = bundleName.replace(/[^\x20-\x7E]/g, "_").replace(/"/g, "");
+      const encodedName = encodeURIComponent(bundleName);
       res.writeHead(200, Object.assign({
         "Content-Type": "application/octet-stream",
         "Content-Length": fs.statSync(file).size,
-        "Content-Disposition": 'attachment; filename="' + bundleName + '"',
+        "Content-Disposition":
+          'attachment; filename="' + asciiFallback + '"; filename*=UTF-8\'\'' + encodedName,
       }, CORS));
       fs.createReadStream(file).pipe(res);
       return;
