@@ -261,10 +261,43 @@
     });
   }
 
-  /* ---------- per-clip video render ---------- */
-  async function renderClip(clip, mediaBlob, ctx, encoder, opts, progressCb) {
+  /* ---------- 事前プローブ：実デコード1フレーム試験 ---------- */
+  async function probeDecode(ab, vt) {
+    let result = false;
+    try {
+      const { samples } = await demuxVideo(ab);
+      const key = samples.find((x) => x.is_sync);
+      if (!key) return false;
+      result = await new Promise((resolve) => {
+        let settled = false;
+        const done = (v) => { if (!settled) { settled = true; try { d.close(); } catch (e) {} resolve(v); } };
+        const d = new VideoDecoder({
+          output: (f) => { f.close(); done(true); },
+          error: () => done(false),
+        });
+        const to = setTimeout(() => done(false), 5000);
+        d.configure({ codec: vt.codec, codedWidth: vt.width, codedHeight: vt.height, description: vt.description });
+        try {
+          d.decode(new EncodedVideoChunk({
+            type: "key",
+            timestamp: 0,
+            data: key.data.slice(),
+          }));
+        } catch (e) { clearTimeout(to); done(false); }
+      });
+    } catch (e) { result = false; }
+    return result;
+  }
+
+  /* ---------- per-clip video render (WebCodecs) ---------- */
+  async function renderClip(clip, mediaBlob, ctx, encoder, opts, progressCb, fallbackCodecs) {
     const ab = await mediaBlob.arrayBuffer();
     const { vt, samples } = await demuxVideo(ab);
+    if (fallbackCodecs && fallbackCodecs.has(vt.codec)) {
+      const e = new Error("事前チェックでNGのコーデック: " + vt.codec);
+      e.useFallback = true;
+      throw e;
+    }
     const ts = vt.timescale;
     const usOf = (sm) => Math.round((sm.cts / ts) * 1e6);
     const inUs = Math.round(clip.in * 1e6);
@@ -284,7 +317,9 @@
       } catch (e) { lastWhy = e.message || String(e); }
     }
     if (!okCfg) {
-      throw new Error("このブラウザは " + vt.codec + "（クリップ: " + clip.mediaName + "）のデコードに非対応です（" + lastWhy + "）。PC版 Chrome / Edge 、または exe版でお試しください");
+      const e = new Error("このブラウザは " + vt.codec + "（クリップ: " + clip.mediaName + "）のデコードに非対応です（" + lastWhy + "）");
+      e.useFallback = true;
+      throw e;
     }
 
     const sw = vt.width || ctx.canvas.width, sh = vt.height || ctx.canvas.height;
@@ -292,9 +327,9 @@
     const dw = Math.max(2, Math.round(sw * scale / 2) * 2), dh = Math.max(2, Math.round(sh * scale / 2) * 2);
     const dx = (opts.w - dw) / 2, dy = (opts.h - dh) / 2;
 
-    let nextTick = 0, held = false, emitted = 0;
+    let nextTick = 0, held = false, emitted = 0, fed = 0, processed = 0, firstErr = null, feedDone = false;
     const totalTicks = Math.max(1, Math.round(clipDurUs / tickUs));
-    let firstErr = null;
+    const frameQ = [];
 
     const emitTick = () => {
       const vf = new VideoFrame(ctx.canvas, { timestamp: baseUs + nextTick, duration: tickUs });
@@ -302,7 +337,6 @@
       vf.close();
       nextTick += tickUs;
       emitted++;
-      progressCb(emitted, totalTicks);
     };
     const draw = (f) => {
       ctx.fillStyle = "#000";
@@ -311,26 +345,46 @@
     };
 
     const decoder = new VideoDecoder({
-      output: (f) => {
-        try {
-          const l = f.timestamp - inUs;
-          if (l >= clipDurUs || l < -1000) { f.close(); return; }
-          if (!held) { draw(f); held = true; f.close(); return; }
-          while (nextTick < l && nextTick < clipDurUs) emitTick();
-          draw(f);
-          f.close();
-        } catch (e) { if (!firstErr) firstErr = e; try { f.close(); } catch (e2) {} }
-      },
+      output: (f) => frameQ.push(f),
       error: (e) => { if (!firstErr) firstErr = e; },
     });
     try {
       decoder.configure(okCfg);
     } catch (e) {
       try { decoder.close(); } catch (e2) {}
-      throw new Error("デコーダー初期化失敗（" + vt.codec + " / " + clip.mediaName + "）: " + (e.message || e));
+      const ex = new Error("デコーダー初期化失敗（" + vt.codec + " / " + clip.mediaName + "）: " + (e.message || e));
+      ex.useFallback = true;
+      throw ex;
     }
 
-    // feed from the last keyframe at/before the in-point
+    // drain loop: processes decoded frames with encoder backpressure
+    const drain = (async () => {
+      while (true) {
+        if (firstErr) { while (frameQ.length) { try { frameQ.shift().close(); } catch (e) {} } return; }
+        if (frameQ.length) {
+          const f = frameQ.shift();
+          try {
+            const l = f.timestamp - inUs;
+            if (l >= clipDurUs || l < -1000) { f.close(); }
+            else {
+              if (!held) { draw(f); held = true; f.close(); }
+              else {
+                while (nextTick < l && nextTick < clipDurUs) emitTick();
+                draw(f);
+                f.close();
+              }
+              processed++;
+              progressCb(emitted, totalTicks);
+            }
+          } catch (e) { if (!firstErr) firstErr = e; try { f.close(); } catch (e2) {} }
+          while (encoder.encodeQueueSize > 24) await sleep(2);
+        } else {
+          if (feedDone) return;
+          await sleep(2);
+        }
+      }
+    })();
+
     let start = 0;
     for (let i = 0; i < samples.length; i++) {
       if (samples[i].is_sync && usOf(samples[i]) <= inUs) start = i;
@@ -340,12 +394,10 @@
       const sm = samples[i];
       const u = usOf(sm);
       if (u > outUs) break;
-      // backpressure on both queues (decoder + encoder)
+      // 未処理フレームを一定以下に保つ（メモリ爆発・勝手にcloseされるのを防ぐ）
       let guard = 0;
-      while (guard++ < 100000 && decoder.state === "configured" &&
-             (decoder.decodeQueueSize > 40 || encoder.encodeQueueSize > 40)) {
-        await sleep(0);
-        if (firstErr) break;
+      while (guard++ < 20000 && !firstErr && decoder.state === "configured" && (fed - processed > 6 || encoder.encodeQueueSize > 24)) {
+        await sleep(2);
       }
       if (firstErr || decoder.state !== "configured") break;
       try {
@@ -353,8 +405,9 @@
           type: sm.is_sync ? "key" : "delta",
           timestamp: u,
           duration: Math.round((sm.duration / ts) * 1e6) || tickUs,
-          data: sm.data,
+          data: sm.data.slice(),
         }));
+        fed++;
       } catch (e) {
         if (!firstErr) firstErr = e;
         break;
@@ -363,18 +416,86 @@
     if (!firstErr && decoder.state === "configured") {
       try { await decoder.flush(); } catch (e) { if (!firstErr) firstErr = e; }
     }
+    feedDone = true;
+    await drain;
     try { decoder.close(); } catch (e) {}
     if (firstErr) {
-      const isAv1 = /^av01/.test(vt.codec);
-      throw new Error("デコード失敗（" + vt.codec + " / " + clip.mediaName + "）: " +
-        ((firstErr && firstErr.message) ? firstErr.message : String(firstErr)) +
-        (isAv1 ? " ※AV1はこの端末では実デコード不可の可能性があります（PC版 Chrome/Edge または exe版を推奨）" : ""));
+      const ex = new Error("デコード失敗（" + vt.codec + " / " + clip.mediaName + "）: " + ((firstErr && firstErr.message) ? firstErr.message : String(firstErr)));
+      ex.useFallback = true;
+      throw ex;
     }
     while (nextTick < clipDurUs) {
       emitTick();
-      if (encoder.encodeQueueSize > 40) await sleep(0);
+      progressCb(emitted, totalTicks);
+      while (encoder.encodeQueueSize > 24) await sleep(2);
     }
     return { emitted };
+  }
+
+  /* ---------- 互換モード: <video>要素からseekで取得（WebCodecsが使えない場合） ---------- */
+  async function renderClipViaVideoElement(clip, mediaBlob, ctx, encoder, opts, progressCb) {
+    const url = URL.createObjectURL(mediaBlob);
+    const v = document.createElement("video");
+    v.muted = true;
+    v.playsInline = true;
+    v.preload = "auto";
+    v.src = url;
+    try {
+      await new Promise((res, rej) => {
+        const t = setTimeout(() => rej(new Error("動画の読み込みタイムアウト")), 20000);
+        v.addEventListener("loadedmetadata", () => { clearTimeout(t); res(); }, { once: true });
+        v.addEventListener("error", () => {
+          clearTimeout(t);
+          rej(new Error("この端末ではこの素材を再生できません（AV1非対応の可能性: iPhone 15 Proより前はAV1ハードウェアデコードがありません）→ PC版 Chrome/Edge または exe版をご利用ください"));
+        }, { once: true });
+      });
+      const sw = v.videoWidth || 1280, sh = v.videoHeight || 720;
+      const scale = Math.min(opts.w / sw, opts.h / sh);
+      const dw = Math.max(2, Math.round(sw * scale / 2) * 2), dh = Math.max(2, Math.round(sh * scale / 2) * 2);
+      const dx = (opts.w - dw) / 2, dy = (opts.h - dh) / 2;
+      const inUs = Math.round(clip.in * 1e6), outUs = Math.round(clip.out * 1e6);
+      const clipDurUs = outUs - inUs;
+      const tickUs = Math.round(1e6 / opts.fps);
+      const baseUs = Math.round(clip.tl * 1e6);
+      const stepUs = Math.round(1e6 / 60); // ソースは60fps前提でサンプリング
+      let nextTick = 0, emitted = 0;
+      const totalTicks = Math.max(1, Math.round(clipDurUs / tickUs));
+      const seekTo = (sec) => new Promise((res, rej) => {
+        const t = setTimeout(() => { v.removeEventListener("seeked", on); rej(new Error("シークタイムアウト")); }, 10000);
+        const on = () => { clearTimeout(t); res(); };
+        v.addEventListener("seeked", on, { once: true });
+        v.currentTime = sec;
+      });
+      const draw = () => {
+        ctx.fillStyle = "#000";
+        ctx.fillRect(0, 0, opts.w, opts.h);
+        ctx.drawImage(v, dx, dy, dw, dh);
+      };
+      const emitTick = () => {
+        const vf = new VideoFrame(ctx.canvas, { timestamp: baseUs + nextTick, duration: tickUs });
+        encoder.encode(vf, { keyFrame: nextTick === 0 });
+        vf.close();
+        nextTick += tickUs;
+        emitted++;
+      };
+      for (let t = 0; t < clipDurUs; t += stepUs) {
+        await seekTo(Math.min(inUs + t, outUs - 4000) / 1e6 + 0.0005);
+        draw();
+        while (nextTick < t + stepUs && nextTick < clipDurUs) {
+          emitTick();
+          while (encoder.encodeQueueSize > 24) await sleep(2);
+        }
+        progressCb(emitted, totalTicks);
+      }
+      while (nextTick < clipDurUs) {
+        emitTick();
+        while (encoder.encodeQueueSize > 24) await sleep(2);
+      }
+      return { emitted };
+    } finally {
+      try { v.pause(); v.removeAttribute("src"); v.load(); } catch (e) {}
+      URL.revokeObjectURL(url);
+    }
   }
 
   /* ---------- audio ---------- */
@@ -524,14 +645,41 @@
 
     const clips = parsed.videoClips;
     let totalFrames = 0;
+
+    // 実デコード事前プローブ（isConfigSupportedが嘘をつく環境向け）
+    const fallbackCodecs = new Set();
+    const probed = new Set();
+    for (const c of clips) {
+      const blob0 = blobs.get(c.guid);
+      if (!blob0) continue;
+      const ab0 = await blob0.arrayBuffer();
+      const vt0 = WM.inspect(ab0).tracks.find((t) => t.handler === "vide");
+      if (!vt0 || !vt0.codec || probed.has(vt0.codec)) continue;
+      probed.add(vt0.codec);
+      setProg(0.08, "コーデック動作確認: " + vt0.codec);
+      const ok = await probeDecode(ab0, vt0);
+      if (!ok) fallbackCodecs.add(vt0.codec);
+    }
+    if (fallbackCodecs.size) {
+      prog.innerHTML = "⚠️ " + esc([...fallbackCodecs].join(", ")) + " はWebCodecsでデコード不可のため <b>互換モード</b>（video要素から取得・時間かかめ）で処理します";
+    }
+
     for (let ci = 0; ci < clips.length; ci++) {
       const c = clips[ci];
       const blob = blobs.get(c.guid);
       if (!blob) throw new Error("素材が見つかりません: " + c.mediaName);
-      const r = await renderClip(c, blob, ctx, encoder, { w, h, fps }, (emitted, total) => {
+      const pcb = (emitted, total) => {
         setProg(0.1 + 0.7 * ((ci + emitted / Math.max(1, total)) / clips.length),
           "クリップ " + (ci + 1) + "/" + clips.length + "（" + esc(c.mediaName.slice(0, 28)) + "…）フレーム " + emitted + "/" + total);
-      });
+      };
+      let r;
+      try {
+        r = await renderClip(c, blob, ctx, encoder, { w, h, fps }, pcb, fallbackCodecs);
+      } catch (e) {
+        if (!e || !e.useFallback) throw e;
+        // 互換モードで同じクリップを再処理
+        r = await renderClipViaVideoElement(c, blob, ctx, encoder, { w, h, fps }, pcb);
+      }
       totalFrames += r.emitted;
       if (encErr) throw encErr;
       while (encoder.encodeQueueSize > 0) await sleep(10);
