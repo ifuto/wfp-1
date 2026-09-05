@@ -1,0 +1,259 @@
+{
+  "tool": "browser-file-splitter v1",
+  "originalName": "%E3%82%BF%E3%82%A4%E3%83%88%E3%83%AB%E3%81%AA%E3%81%97-2026-09-04%2022%2050%2025(copy).wfpbundle.zip",
+  "originalSize": 771038851,
+  "chunkSize": 25165824,
+  "totalParts": 31,
+  "joinCommand": "cat \"%E3%82%BF%E3%82%A4%E3%83%88%E3%83%AB%E3%81%AA%E3%81%97-2026-09-04%2022%2050%2025(copy).wfpbundle.zip\".part*\\.bin\" > \"%E3%82%BF%E3%82%A4%E3%83%88%E3%83%AB%E3%81%AA%E3%81%97-2026-09-04%2022%2050%2025(copy).wfpbundle.zip\"",
+  "joinCommandWindows": "cmd /c copy /b \"%E3%82%BF%E3%82%A4%E3%83%88%E3%83%AB%E3%81%AA%E3%81%97-2026-09-04%2022%2050%2025(copy).wfpbundle.zip.part001.bin\"+\"%E3%82%BF%E3%82%A4%E3%83%88%E3%83%AB%E3%81%AA%E3%81%97-2026-09-04%2022%2050%2025(copy).wfpbundle.zip.part002.bin\"+\"%E3%82%BF%E3%82%A4%E3%83%88%E3%83%AB%E3%81%AA%E3%81%97-2026-09-04%2022%2050%2025(copy).wfpbundle.zip.part003.bin\"+\"%E3%82%BF%E3%82%A4%E3%83%88%E3%83%AB%E3%81%AA%E3%81%97-2026-09-04%2022%2050%2025(copy).wfpbundle.zip.part004.bin\"+\"%E3%82%BF%E3%82%A4%E3%83%88%E3%83%AB%E3%81%AA%E3%81%97-2026-09-04%2022%2050%2025(copy).wfpbundle.zip.part005.bin\"+\"%E3%82%BF%E3%82%A4%E3%83%88%E3%83%AB%E3%81%AA%E3%81%97-2026-09-04%2022%2050%2025(copy).wfpbundle.zip.part006.bin\"+\"%E3%82%BF%E3%82%A4%E3%83%88%E3%83%AB%E3%81%AA%E3%81%97-2026-09-04%2022%2050%2025(copy).wfpbundle.zip.part007.bin\"+\"%E3%82%BF%E3%82%A4%E3%83%88%E3%83%AB%E3%81%AA%E3%81%97-2026-09-04%2022%2050%2025(copy).wfpbundle.zip.part008.bin\"+\"%E3%82%BF%E3%82%A4%E3%83%88%E3%83%AB%E3%81%AA%E3%81%97-2026-09-04%2022%2050%2025(copy).wfpbundle.zip.part009.bin\"+\"%E3%82%BF%E3%82%A4%E3%83%88%E3%83%AB%E3%81%AA%E3%81%97-2026-09-04%2022%2050%2025(copy).wfpbundle.zip.part010.bin\"+\"%E3%82%BF%E3%82%A4%E3%83%88%E3%83%AB%E3%81%AA%E3%81%97-2026-09-04%2022%2050%2025(copy).wfpbundle.zip.part011.bin\"+\"%E3%82%BF%E3%82%A4%E3%83%88%E3%83%AB%E3%81%AA%E3%81%97-2026-09-04%2022%2050%2025(copy).wfpbundle.zip.part012.bin\"+\"%E3%82%BF%E3%82%A4%E3%83%88%E3%83%AB%E3%81%AA%E3%81%97-2026-09-04%2022%2050%2025(copy).wfpbundle.zip.part013.bin\"+\"%E3%82%BF%E3%82%A4%E3%83%88%E3%83%AB%E3%81%AA%E3%81%97-2026-09-04%2022%2050%2025(copy).wfpbundle.zip.part014.bin\"+\"%E3%82%BF%E3%82%A4%E3%83%88%E3%83%AB%E3%81%AA%E3%81%97-2026-09-04%2022%2050%2025(copy).wfpbundle.zip.part015.bin\"+\"%E3%82%BF%E3%82%A4%E3%83%88%E3%83%AB%E3%81%AA%E3%81%97-2026-09-04%2022%2050%2025(copy).wfpbundle.zip.part016.bin\"+\"%E3%82%BF%E3%82%A4%E3%83%88%E3%83%AB%E3%81%AA%E3%81%97-2026-09-04%2022%2050%2025(copy).wfpbundle.zip.part017.bin\"+\"%E3%82%BF%E3%82%A4%E3%83%88%E3%83%AB%E3%81%AA%E3%81%97-2026-09-04%2022%2050%2025(copy).wfpbundle.zip.part018.bin\"+\"%E3%82%BF%E3%82%A4%E3%83%88%E3%83%AB%E3%81%AA%E3%81%97-2026-09-04%2022%2050%2025(copy).wfpbundle.zip.part019.bin\"+\"%E3%82%BF%E3%82%A4%E3%83%88%E3%83%AB%E3%81%AA%E3%81%97-2026-09-04%2022%2050%2025(copy).wfpbundle.zip.part020.bin\"+\"%E3%82%BF%E3%82%A4%E3%83%88%E3%83%AB%E3%81%AA%E3%81%97-2026-09-04%2022%2050%2025(copy).wfpbundle.zip.part021.bin\"+\"%E3%82%BF%E3%82%A4%E3%83%88%E3%83%AB%E3%81%AA%E3%81%97-2026-09-04%2022%2050%2025(copy).wfpbundle.zip.part022.bin\"+\"%E3%82%BF%E3%82%A4%E3%83%88%E3%83%AB%E3%81%AA%E3%81%97-2026-09-04%2022%2050%2025(copy).wfpbundle.zip.part023.bin\"+\"%E3%82%BF%E3%82%A4%E3%83%88%E3%83%AB%E3%81%AA%E3%81%97-2026-09-04%2022%2050%2025(copy).wfpbundle.zip.part024.bin\"+\"%E3%82%BF%E3%82%A4%E3%83%88%E3%83%AB%E3%81%AA%E3%81%97-2026-09-04%2022%2050%2025(copy).wfpbundle.zip.part025.bin\"+\"%E3%82%BF%E3%82%A4%E3%83%88%E3%83%AB%E3%81%AA%E3%81%97-2026-09-04%2022%2050%2025(copy).wfpbundle.zip.part026.bin\"+\"%E3%82%BF%E3%82%A4%E3%83%88%E3%83%AB%E3%81%AA%E3%81%97-2026-09-04%2022%2050%2025(copy).wfpbundle.zip.part027.bin\"+\"%E3%82%BF%E3%82%A4%E3%83%88%E3%83%AB%E3%81%AA%E3%81%97-2026-09-04%2022%2050%2025(copy).wfpbundle.zip.part028.bin\"+\"%E3%82%BF%E3%82%A4%E3%83%88%E3%83%AB%E3%81%AA%E3%81%97-2026-09-04%2022%2050%2025(copy).wfpbundle.zip.part029.bin\"+\"%E3%82%BF%E3%82%A4%E3%83%88%E3%83%AB%E3%81%AA%E3%81%97-2026-09-04%2022%2050%2025(copy).wfpbundle.zip.part030.bin\"+\"%E3%82%BF%E3%82%A4%E3%83%88%E3%83%AB%E3%81%AA%E3%81%97-2026-09-04%2022%2050%2025(copy).wfpbundle.zip.part031.bin\" \"%E3%82%BF%E3%82%A4%E3%83%88%E3%83%AB%E3%81%AA%E3%81%97-2026-09-04%2022%2050%2025(copy).wfpbundle.zip\"",
+  "parts": [
+    {
+      "index": 1,
+      "file": "%E3%82%BF%E3%82%A4%E3%83%88%E3%83%AB%E3%81%AA%E3%81%97-2026-09-04%2022%2050%2025(copy).wfpbundle.zip.part001.bin",
+      "start": 0,
+      "end": 25165823,
+      "size": 25165824,
+      "sha256": "04dded39d7fc486a192e6d351e202e098cc1d1224ffe490bbef50d2bc9fd42de"
+    },
+    {
+      "index": 2,
+      "file": "%E3%82%BF%E3%82%A4%E3%83%88%E3%83%AB%E3%81%AA%E3%81%97-2026-09-04%2022%2050%2025(copy).wfpbundle.zip.part002.bin",
+      "start": 25165824,
+      "end": 50331647,
+      "size": 25165824,
+      "sha256": "b71bc30dbc2e0ad6a66e9d33686a5d052c17655eb7d314ce4e51657100a34207"
+    },
+    {
+      "index": 3,
+      "file": "%E3%82%BF%E3%82%A4%E3%83%88%E3%83%AB%E3%81%AA%E3%81%97-2026-09-04%2022%2050%2025(copy).wfpbundle.zip.part003.bin",
+      "start": 50331648,
+      "end": 75497471,
+      "size": 25165824,
+      "sha256": "517bf7dff923be71fa8474738a1c1c6959fd5004e70aaa3fef4cd55a7af78b03"
+    },
+    {
+      "index": 4,
+      "file": "%E3%82%BF%E3%82%A4%E3%83%88%E3%83%AB%E3%81%AA%E3%81%97-2026-09-04%2022%2050%2025(copy).wfpbundle.zip.part004.bin",
+      "start": 75497472,
+      "end": 100663295,
+      "size": 25165824,
+      "sha256": "b3df06238ab4b5138cdc7bb7d186ab414fdf6fe550e3c50c20ccaa33cabafc0e"
+    },
+    {
+      "index": 5,
+      "file": "%E3%82%BF%E3%82%A4%E3%83%88%E3%83%AB%E3%81%AA%E3%81%97-2026-09-04%2022%2050%2025(copy).wfpbundle.zip.part005.bin",
+      "start": 100663296,
+      "end": 125829119,
+      "size": 25165824,
+      "sha256": "83b3d77012fa79ab48ede07a0716b462f78878ccc7e901085a0d0a5db5fb7e29"
+    },
+    {
+      "index": 6,
+      "file": "%E3%82%BF%E3%82%A4%E3%83%88%E3%83%AB%E3%81%AA%E3%81%97-2026-09-04%2022%2050%2025(copy).wfpbundle.zip.part006.bin",
+      "start": 125829120,
+      "end": 150994943,
+      "size": 25165824,
+      "sha256": "f0b62107fa72a17053d555ed4fe9df4fc63946309e6b5183e439b99c1cdd3878"
+    },
+    {
+      "index": 7,
+      "file": "%E3%82%BF%E3%82%A4%E3%83%88%E3%83%AB%E3%81%AA%E3%81%97-2026-09-04%2022%2050%2025(copy).wfpbundle.zip.part007.bin",
+      "start": 150994944,
+      "end": 176160767,
+      "size": 25165824,
+      "sha256": "434b09b9d1d75a724cef39612ba0f04a462ab07e9ee9307396d757e5d949dabb"
+    },
+    {
+      "index": 8,
+      "file": "%E3%82%BF%E3%82%A4%E3%83%88%E3%83%AB%E3%81%AA%E3%81%97-2026-09-04%2022%2050%2025(copy).wfpbundle.zip.part008.bin",
+      "start": 176160768,
+      "end": 201326591,
+      "size": 25165824,
+      "sha256": "4192310e36b2017edaf172694982ae1e418b206628aff57d7645bee2d05edccf"
+    },
+    {
+      "index": 9,
+      "file": "%E3%82%BF%E3%82%A4%E3%83%88%E3%83%AB%E3%81%AA%E3%81%97-2026-09-04%2022%2050%2025(copy).wfpbundle.zip.part009.bin",
+      "start": 201326592,
+      "end": 226492415,
+      "size": 25165824,
+      "sha256": "732f2ac051d719ab77a4185bb2be64cef3ddfd22e574d8c387fef0460ac9f2a4"
+    },
+    {
+      "index": 10,
+      "file": "%E3%82%BF%E3%82%A4%E3%83%88%E3%83%AB%E3%81%AA%E3%81%97-2026-09-04%2022%2050%2025(copy).wfpbundle.zip.part010.bin",
+      "start": 226492416,
+      "end": 251658239,
+      "size": 25165824,
+      "sha256": "7d5d38569228a1a2eb1b7698cb4f957d6643d3d7d958f41cde7b347a6c5a90a8"
+    },
+    {
+      "index": 11,
+      "file": "%E3%82%BF%E3%82%A4%E3%83%88%E3%83%AB%E3%81%AA%E3%81%97-2026-09-04%2022%2050%2025(copy).wfpbundle.zip.part011.bin",
+      "start": 251658240,
+      "end": 276824063,
+      "size": 25165824,
+      "sha256": "ae8a197332f034990dd20c94b9cebbea3cd761173eb577d94ed370352cfc0c44"
+    },
+    {
+      "index": 12,
+      "file": "%E3%82%BF%E3%82%A4%E3%83%88%E3%83%AB%E3%81%AA%E3%81%97-2026-09-04%2022%2050%2025(copy).wfpbundle.zip.part012.bin",
+      "start": 276824064,
+      "end": 301989887,
+      "size": 25165824,
+      "sha256": "d37296569dd9473306ae5c18abdae9a9fea9090786bce2e604d2b515adccb8de"
+    },
+    {
+      "index": 13,
+      "file": "%E3%82%BF%E3%82%A4%E3%83%88%E3%83%AB%E3%81%AA%E3%81%97-2026-09-04%2022%2050%2025(copy).wfpbundle.zip.part013.bin",
+      "start": 301989888,
+      "end": 327155711,
+      "size": 25165824,
+      "sha256": "aa60623dadd2528745ea30a1fb7dfe5752749a45f069686427a1b61ff85006b3"
+    },
+    {
+      "index": 14,
+      "file": "%E3%82%BF%E3%82%A4%E3%83%88%E3%83%AB%E3%81%AA%E3%81%97-2026-09-04%2022%2050%2025(copy).wfpbundle.zip.part014.bin",
+      "start": 327155712,
+      "end": 352321535,
+      "size": 25165824,
+      "sha256": "366b4fe75edf8ab021aa8ed72e0af4b9cafbd1e71210612a1e6a7f291dd9167d"
+    },
+    {
+      "index": 15,
+      "file": "%E3%82%BF%E3%82%A4%E3%83%88%E3%83%AB%E3%81%AA%E3%81%97-2026-09-04%2022%2050%2025(copy).wfpbundle.zip.part015.bin",
+      "start": 352321536,
+      "end": 377487359,
+      "size": 25165824,
+      "sha256": "b2809a55f45dc42fdc4aa0560a19459aa46ad5788f64c36c94189c63bc00bdf7"
+    },
+    {
+      "index": 16,
+      "file": "%E3%82%BF%E3%82%A4%E3%83%88%E3%83%AB%E3%81%AA%E3%81%97-2026-09-04%2022%2050%2025(copy).wfpbundle.zip.part016.bin",
+      "start": 377487360,
+      "end": 402653183,
+      "size": 25165824,
+      "sha256": "16b05202c1549f8da3555148a1258cfa0c6e794bfc8c141ea002510af177b30e"
+    },
+    {
+      "index": 17,
+      "file": "%E3%82%BF%E3%82%A4%E3%83%88%E3%83%AB%E3%81%AA%E3%81%97-2026-09-04%2022%2050%2025(copy).wfpbundle.zip.part017.bin",
+      "start": 402653184,
+      "end": 427819007,
+      "size": 25165824,
+      "sha256": "cff2282b4aee22aef6c0d4d9f09eeb42f706a32eeafcbcd150ee85177a5802fd"
+    },
+    {
+      "index": 18,
+      "file": "%E3%82%BF%E3%82%A4%E3%83%88%E3%83%AB%E3%81%AA%E3%81%97-2026-09-04%2022%2050%2025(copy).wfpbundle.zip.part018.bin",
+      "start": 427819008,
+      "end": 452984831,
+      "size": 25165824,
+      "sha256": "c4789eb11b7093e7ce9f4cc93a2d18081627bbe5cd999c2b4dca92b14a1887f6"
+    },
+    {
+      "index": 19,
+      "file": "%E3%82%BF%E3%82%A4%E3%83%88%E3%83%AB%E3%81%AA%E3%81%97-2026-09-04%2022%2050%2025(copy).wfpbundle.zip.part019.bin",
+      "start": 452984832,
+      "end": 478150655,
+      "size": 25165824,
+      "sha256": "354d849f3f09f6b43ed5318cbe4a6fbcb33a1e799d27b8a2eec5050b46f12b6d"
+    },
+    {
+      "index": 20,
+      "file": "%E3%82%BF%E3%82%A4%E3%83%88%E3%83%AB%E3%81%AA%E3%81%97-2026-09-04%2022%2050%2025(copy).wfpbundle.zip.part020.bin",
+      "start": 478150656,
+      "end": 503316479,
+      "size": 25165824,
+      "sha256": "979f93a21518746d37128f18b5d677dfe1b54bb09072cdb4c71cc908ccc3a6d3"
+    },
+    {
+      "index": 21,
+      "file": "%E3%82%BF%E3%82%A4%E3%83%88%E3%83%AB%E3%81%AA%E3%81%97-2026-09-04%2022%2050%2025(copy).wfpbundle.zip.part021.bin",
+      "start": 503316480,
+      "end": 528482303,
+      "size": 25165824,
+      "sha256": "b361f69c733bbb295e56d9e6c122be5810566436d67bec844c62fbab894e822c"
+    },
+    {
+      "index": 22,
+      "file": "%E3%82%BF%E3%82%A4%E3%83%88%E3%83%AB%E3%81%AA%E3%81%97-2026-09-04%2022%2050%2025(copy).wfpbundle.zip.part022.bin",
+      "start": 528482304,
+      "end": 553648127,
+      "size": 25165824,
+      "sha256": "c49bf16ff08b0306216c440de4442967c4a31d9120f7a5246683cd62ba9dbb60"
+    },
+    {
+      "index": 23,
+      "file": "%E3%82%BF%E3%82%A4%E3%83%88%E3%83%AB%E3%81%AA%E3%81%97-2026-09-04%2022%2050%2025(copy).wfpbundle.zip.part023.bin",
+      "start": 553648128,
+      "end": 578813951,
+      "size": 25165824,
+      "sha256": "cb0f7534f905774ee6fd8d15fb20edf73a1b2efa5870f419a55117260631d860"
+    },
+    {
+      "index": 24,
+      "file": "%E3%82%BF%E3%82%A4%E3%83%88%E3%83%AB%E3%81%AA%E3%81%97-2026-09-04%2022%2050%2025(copy).wfpbundle.zip.part024.bin",
+      "start": 578813952,
+      "end": 603979775,
+      "size": 25165824,
+      "sha256": "58ec4f8c3a008002e16475829f227ba5d409b03558ec222ee29f14384e82d48e"
+    },
+    {
+      "index": 25,
+      "file": "%E3%82%BF%E3%82%A4%E3%83%88%E3%83%AB%E3%81%AA%E3%81%97-2026-09-04%2022%2050%2025(copy).wfpbundle.zip.part025.bin",
+      "start": 603979776,
+      "end": 629145599,
+      "size": 25165824,
+      "sha256": "b78e619e93ab149415b85a9d757c7ed241d82136eec49f1c59e258f4241c248e"
+    },
+    {
+      "index": 26,
+      "file": "%E3%82%BF%E3%82%A4%E3%83%88%E3%83%AB%E3%81%AA%E3%81%97-2026-09-04%2022%2050%2025(copy).wfpbundle.zip.part026.bin",
+      "start": 629145600,
+      "end": 654311423,
+      "size": 25165824,
+      "sha256": "a6b138c9a32c7cd0aafbc7f3207abe01a747190226d94546e7716915603f58e8"
+    },
+    {
+      "index": 27,
+      "file": "%E3%82%BF%E3%82%A4%E3%83%88%E3%83%AB%E3%81%AA%E3%81%97-2026-09-04%2022%2050%2025(copy).wfpbundle.zip.part027.bin",
+      "start": 654311424,
+      "end": 679477247,
+      "size": 25165824,
+      "sha256": "8418cd37f9a4ff219adb2fb125f770c519166baa96f91a856790c13cd5077be4"
+    },
+    {
+      "index": 28,
+      "file": "%E3%82%BF%E3%82%A4%E3%83%88%E3%83%AB%E3%81%AA%E3%81%97-2026-09-04%2022%2050%2025(copy).wfpbundle.zip.part028.bin",
+      "start": 679477248,
+      "end": 704643071,
+      "size": 25165824,
+      "sha256": "1242b53234877432f8242e857f76a9ae371b1d3a31c05027b1b758da23762bdf"
+    },
+    {
+      "index": 29,
+      "file": "%E3%82%BF%E3%82%A4%E3%83%88%E3%83%AB%E3%81%AA%E3%81%97-2026-09-04%2022%2050%2025(copy).wfpbundle.zip.part029.bin",
+      "start": 704643072,
+      "end": 729808895,
+      "size": 25165824,
+      "sha256": "3575be304af728683a427af820ea529ee595a1415981c2f049fd1739f4f540ed"
+    },
+    {
+      "index": 30,
+      "file": "%E3%82%BF%E3%82%A4%E3%83%88%E3%83%AB%E3%81%AA%E3%81%97-2026-09-04%2022%2050%2025(copy).wfpbundle.zip.part030.bin",
+      "start": 729808896,
+      "end": 754974719,
+      "size": 25165824,
+      "sha256": "d94fe25c1f9065e7fd4d41f243e434bdfe70cd290eb4e2f632af68d6ccc6fa0c"
+    },
+    {
+      "index": 31,
+      "file": "%E3%82%BF%E3%82%A4%E3%83%88%E3%83%AB%E3%81%AA%E3%81%97-2026-09-04%2022%2050%2025(copy).wfpbundle.zip.part031.bin",
+      "start": 754974720,
+      "end": 771038850,
+      "size": 16064131,
+      "sha256": "f89b6dc367107b9a11ff0986d56db865645ac92c3406072dcb6a3cc2c17d9022"
+    }
+  ]
+}
