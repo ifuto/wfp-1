@@ -1,0 +1,612 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ファイル分割ツール (split.html)</title>
+<style>
+:root{--bg:#f6f8fa;--card:#fff;--fg:#1f2328;--muted:#59636e;--line:#d1d9e0;--accent:#0969da;--accent-fg:#fff;--ok:#1a7f37;--warn-bg:#fff8c5;--warn-fg:#7d4e00;--err:#d1242f;--mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+*{box-sizing:border-box}
+body{margin:0;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Hiragino Sans","Noto Sans JP",Meiryo,sans-serif;background:var(--bg);color:var(--fg);line-height:1.55;font-size:15px}
+main{max-width:920px;margin:0 auto;padding:28px 16px 80px}
+h1{font-size:22px;margin:0 0 6px}
+h3{font-size:14px;margin:18px 0 6px}
+code{font-family:var(--mono);font-size:.92em;background:#f0f2f4;padding:1px 4px;border-radius:4px}
+.lead{color:var(--muted);margin:0 0 20px;font-size:14px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:18px;margin-bottom:16px}
+.card h2{font-size:15px;margin:0 0 12px;display:flex;align-items:center;gap:8px}
+.step{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;background:var(--accent);color:#fff;font-size:12px;font-weight:700;flex:none}
+#drop{border:2px dashed var(--line);border-radius:10px;padding:34px 16px;text-align:center;cursor:pointer;transition:background .15s,border-color .15s;color:var(--muted)}
+#drop.over{border-color:var(--accent);background:#eaf2ff}
+#drop b{color:var(--fg)}
+.file-info{margin-top:12px;font-size:14px}
+.row{display:flex;flex-wrap:wrap;gap:10px 16px;align-items:center;margin-bottom:10px}
+label.inline{display:inline-flex;align-items:center;gap:6px}
+input[type=number]{width:90px;padding:6px 8px;border:1px solid var(--line);border-radius:6px;font-size:15px}
+input[type=text]{padding:6px 8px;border:1px solid var(--line);border-radius:6px;font-size:14px;min-width:260px;flex:1}
+select{padding:6px 8px;border:1px solid var(--line);border-radius:6px;font-size:14px;background:#fff}
+button{font:inherit;padding:8px 14px;border-radius:6px;border:1px solid var(--line);background:#f6f8fa;cursor:pointer;color:var(--fg)}
+button:hover:not(:disabled){background:#eef1f4}
+button:disabled{opacity:.5;cursor:not-allowed}
+button.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-fg);font-weight:600}
+button.primary:hover:not(:disabled){background:#0757ba}
+button.small{padding:3px 8px;font-size:12px}
+.presets button{padding:4px 10px;font-size:13px}
+.hint{color:var(--muted);font-size:13px}
+.warn{background:var(--warn-bg);color:var(--warn-fg);border:1px solid rgba(212,167,44,.4);border-radius:6px;padding:8px 10px;font-size:13px;margin:8px 0}
+.plan{padding:10px 12px;background:#f6f8fa;border-radius:6px;font-size:14px;margin:12px 0}
+progress{width:100%;height:12px}
+.status{margin:8px 0;font-size:14px;min-height:1.5em}
+.status.ok{color:var(--ok)} .status.err{color:var(--err)}
+.table-wrap{max-height:340px;overflow:auto;border:1px solid var(--line);border-radius:6px;margin-top:8px}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);white-space:nowrap}
+thead th{position:sticky;top:0;background:#fff}
+td.hash{font-family:var(--mono);font-size:12px;color:var(--muted)}
+td.name{font-family:var(--mono)}
+td.saved{color:var(--ok)}
+textarea{width:100%;min-height:160px;font-family:var(--mono);font-size:12px;border:1px solid var(--line);border-radius:6px;padding:8px;resize:vertical}
+pre{background:#f6f8fa;border:1px solid var(--line);border-radius:6px;padding:10px;font-size:12px;overflow:auto;white-space:pre-wrap;word-break:break-all;margin:6px 0 12px}
+ol{padding-left:20px;margin:0}
+ol li{margin-bottom:4px}
+</style>
+</head>
+<body>
+<main>
+  <h1>ファイル分割ツール</h1>
+  <p class="lead">大きいファイルをアップロード上限（25MB など）以下のパーツに分割します。処理はすべてブラウザ内で完結し、ファイルはどこにも送信されません。分割したパーツは <code>cat</code> / <code>copy /b</code> / 付属の <code>merge.py</code> で元どおり結合できます。</p>
+
+  <section class="card">
+    <h2><span class="step">1</span> ファイルを選ぶ</h2>
+    <div id="drop"><b>ここにファイルをドロップ</b><br>またはクリックして選択</div>
+    <input type="file" id="file-input" hidden>
+    <div class="file-info" id="file-info"></div>
+  </section>
+
+  <section class="card">
+    <h2><span class="step">2</span> 設定して分割</h2>
+    <div class="row">
+      <label class="inline">パーツサイズ <input type="number" id="part-size" value="20" min="0.1" step="0.1"></label>
+      <select id="part-unit">
+        <option value="1000000" selected>MB (1,000,000 bytes)</option>
+        <option value="1048576">MiB (1,048,576 bytes)</option>
+      </select>
+      <span class="presets">プリセット:
+        <button type="button" data-preset="10">10</button>
+        <button type="button" data-preset="15">15</button>
+        <button type="button" data-preset="20">20</button>
+        <button type="button" data-preset="24">24</button>
+      </span>
+    </div>
+    <div class="row">
+      <span>パーツ形式:</span>
+      <label class="inline"><input type="radio" name="fmt" id="fmt-raw" checked> そのまま分割 <span class="hint">(name.zip.001, .002 …)</span></label>
+      <label class="inline"><input type="radio" name="fmt" id="fmt-zip"> 各パーツをZIPで包む <span class="hint">(name.part001.zip … アップロード先が拡張子で弾くとき用)</span></label>
+    </div>
+    <div class="row">
+      <label class="inline" style="flex:1">結合後のファイル名 <input type="text" id="out-name" placeholder="例: project.wfpbundle"></label>
+    </div>
+    <div class="warn" id="limit-warn" hidden>⚠ パーツサイズが 25,000,000 bytes を超えています。アップロード上限に引っかかる可能性があります。</div>
+    <div class="plan" id="plan">ファイルを選ぶとここに分割プランが出ます。</div>
+    <button type="button" class="primary" id="btn-split" disabled>分割する（読み込み＆ハッシュ計算）</button>
+    <span class="hint">※ この段階ではまだ何も保存されません</span>
+  </section>
+
+  <section class="card" id="results" hidden>
+    <h2><span class="step">3</span> 保存する</h2>
+    <progress id="progress" value="0" max="1"></progress>
+    <div class="status" id="status"></div>
+    <div class="row">
+      <button type="button" class="primary" id="btn-folder" disabled>フォルダを選んで一括保存（Chrome / Edge 推奨）</button>
+      <button type="button" id="btn-download-all" disabled>全部ダウンロード（順番に）</button>
+      <button type="button" id="btn-manifest" disabled>manifest.json をダウンロード</button>
+    </div>
+    <p class="hint" id="folder-hint">「全部ダウンロード」でブラウザが「複数ファイルのダウンロードを許可しますか？」と聞いてきたら <b>許可</b> してください。取りこぼした分は表の「保存」リンクから個別に落とせます。</p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>#</th><th>ファイル名</th><th>サイズ</th><th>SHA-256</th><th></th><th></th></tr></thead>
+        <tbody id="parts-body"></tbody>
+      </table>
+    </div>
+
+    <h3>manifest（パーツ一覧＋ハッシュ）</h3>
+    <p class="hint">パーツと一緒に <b>manifest.json もアップロード</b>してください。JSON をアップロードできない場合はこのテキストを <button type="button" class="small" id="btn-copy">コピー</button> してチャットに貼り付けでもOKです。</p>
+    <textarea id="manifest-text" readonly spellcheck="false"></textarea>
+
+    <h3>自分で結合する場合</h3>
+    <p class="hint">macOS / Linux:</p>
+    <pre id="cmd-cat"></pre>
+    <p class="hint">Windows（コマンドプロンプト）:</p>
+    <pre id="cmd-copy"></pre>
+    <p class="hint">または <code>python3 merge.py &lt;パーツのあるフォルダ&gt;</code>（manifest のハッシュ検証つき）</p>
+    <pre id="log" hidden></pre>
+  </section>
+
+  <section class="card">
+    <h2>使い方</h2>
+    <ol>
+      <li>ファイルをドロップ → パーツサイズを確認（既定 20 MB。上限 25 MB なら余裕あり）→「分割する」</li>
+      <li>Chrome / Edge なら「フォルダを選んで一括保存」で空のフォルダを選ぶと、全パーツ＋manifest.json が一気に書き出されます</li>
+      <li>書き出されたパーツ（<code>.001, .002 …</code>）と <code>manifest.json</code> を全部アップロード。1メッセージに複数まとめてOK</li>
+      <li>受け取った側で <code>merge.py</code>（または cat）で結合し、ハッシュを検証して完成</li>
+    </ol>
+  </section>
+</main>
+
+<script id="split-core">
+// ===== core: 純粋関数のみ（DOM 非依存。Node でもテスト可能） =====
+const SplitCore = (() => {
+  'use strict';
+
+  function fmtBytes(n) {
+    if (typeof n !== 'number' || !Number.isFinite(n)) return '-';
+    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    let i = 0, v = n;
+    while (v >= 1000 && i < units.length - 1) { v /= 1000; i++; }
+    return (i === 0 ? String(v) : v.toFixed(v < 10 ? 2 : 1)) + ' ' + units[i];
+  }
+
+  function pad(n, w) { return String(n).padStart(w, '0'); }
+
+  function hex(buf) {
+    const u = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
+    let s = '';
+    for (let i = 0; i < u.length; i++) s += u[i].toString(16).padStart(2, '0');
+    return s;
+  }
+
+  // ---- CRC-32 (ZIP 用) ----
+  const CRC_TABLE = (() => {
+    const t = new Uint32Array(256);
+    for (let i = 0; i < 256; i++) {
+      let c = i;
+      for (let k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+      t[i] = c >>> 0;
+    }
+    return t;
+  })();
+
+  function crc32(bytes) {
+    let c = 0xFFFFFFFF;
+    for (let i = 0; i < bytes.length; i++) c = CRC_TABLE[(c ^ bytes[i]) & 0xFF] ^ (c >>> 8);
+    return (c ^ 0xFFFFFFFF) >>> 0;
+  }
+
+  // ---- SHA-256: WebCrypto が使えなければ純 JS 実装にフォールバック ----
+  const K = new Uint32Array([
+    0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,
+    0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,
+    0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,
+    0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,
+    0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,
+    0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,
+    0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,
+    0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2]);
+
+  function sha256js(data) {
+    const H = new Uint32Array([0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19]);
+    const len = data.length;
+    const bits = len * 8;
+    const padLen = Math.ceil((len + 9) / 64) * 64;
+    const buf = new Uint8Array(padLen);
+    buf.set(data);
+    buf[len] = 0x80;
+    const dv = new DataView(buf.buffer);
+    dv.setUint32(padLen - 8, Math.floor(bits / 4294967296));
+    dv.setUint32(padLen - 4, bits >>> 0);
+    const W = new Uint32Array(64);
+    for (let off = 0; off < padLen; off += 64) {
+      for (let i = 0; i < 16; i++) W[i] = dv.getUint32(off + i * 4);
+      for (let i = 16; i < 64; i++) {
+        const w15 = W[i - 15], w2 = W[i - 2];
+        const s0 = ((w15 >>> 7) | (w15 << 25)) ^ ((w15 >>> 18) | (w15 << 14)) ^ (w15 >>> 3);
+        const s1 = ((w2 >>> 17) | (w2 << 15)) ^ ((w2 >>> 19) | (w2 << 13)) ^ (w2 >>> 10);
+        W[i] = (W[i - 16] + s0 + W[i - 7] + s1) >>> 0;
+      }
+      let a = H[0], b = H[1], c = H[2], d = H[3], e = H[4], f = H[5], g = H[6], h = H[7];
+      for (let i = 0; i < 64; i++) {
+        const S1 = ((e >>> 6) | (e << 26)) ^ ((e >>> 11) | (e << 21)) ^ ((e >>> 25) | (e << 7));
+        const ch = (e & f) ^ (~e & g);
+        const t1 = (h + S1 + ch + K[i] + W[i]) >>> 0;
+        const S0 = ((a >>> 2) | (a << 30)) ^ ((a >>> 13) | (a << 19)) ^ ((a >>> 22) | (a << 10));
+        const maj = (a & b) ^ (a & c) ^ (b & c);
+        const t2 = (S0 + maj) >>> 0;
+        h = g; g = f; f = e; e = (d + t1) >>> 0; d = c; c = b; b = a; a = (t1 + t2) >>> 0;
+      }
+      H[0] = (H[0] + a) >>> 0; H[1] = (H[1] + b) >>> 0; H[2] = (H[2] + c) >>> 0; H[3] = (H[3] + d) >>> 0;
+      H[4] = (H[4] + e) >>> 0; H[5] = (H[5] + f) >>> 0; H[6] = (H[6] + g) >>> 0; H[7] = (H[7] + h) >>> 0;
+    }
+    let out = '';
+    for (let i = 0; i < 8; i++) out += H[i].toString(16).padStart(8, '0');
+    return out;
+  }
+
+  async function sha256(bytes) {
+    const subtle = (typeof crypto !== 'undefined' && crypto && crypto.subtle) ? crypto.subtle : null;
+    if (subtle) {
+      try { return hex(await subtle.digest('SHA-256', bytes)); } catch (e) { /* fall back */ }
+    }
+    return sha256js(bytes);
+  }
+
+  // ---- 分割プラン ----
+  function planParts(fileSize, partSize) {
+    if (!(partSize > 0) || !(fileSize >= 0)) throw new Error('invalid size');
+    const count = fileSize === 0 ? 0 : Math.ceil(fileSize / partSize);
+    const width = Math.max(3, String(count).length);
+    const parts = [];
+    for (let i = 0; i < count; i++) {
+      const offset = i * partSize;
+      const end = Math.min(fileSize, offset + partSize);
+      parts.push({ index: i + 1, offset, size: end - offset });
+    }
+    return { count, width, parts };
+  }
+
+  function partName(originalName, index, width, wrap) {
+    const num = pad(index, width);
+    if (!wrap) return `${originalName}.${num}`;
+    const stem = originalName.replace(/\.[^./\\]+$/, '');
+    return `${stem || originalName}.part${num}.zip`;
+  }
+
+  // ---- 1 エントリ・無圧縮(STORE)の ZIP でパーツを包む ----
+  function buildZipWrapper(entryName, dataBlob, crc, size, date) {
+    date = date || new Date();
+    const nameBytes = new TextEncoder().encode(entryName);
+    const dosTime = (date.getHours() << 11) | (date.getMinutes() << 5) | (date.getSeconds() >> 1);
+    const dosDate = ((date.getFullYear() - 1980) << 9) | ((date.getMonth() + 1) << 5) | date.getDate();
+
+    const lfh = new DataView(new ArrayBuffer(30));
+    lfh.setUint32(0, 0x04034b50, true);   // local file header signature
+    lfh.setUint16(4, 20, true);           // version needed to extract (2.0)
+    lfh.setUint16(6, 0x0800, true);       // general purpose flag: UTF-8 file name
+    lfh.setUint16(8, 0, true);            // compression: STORE
+    lfh.setUint16(10, dosTime, true);
+    lfh.setUint16(12, dosDate, true);
+    lfh.setUint32(14, crc, true);
+    lfh.setUint32(18, size, true);        // compressed size
+    lfh.setUint32(22, size, true);        // uncompressed size
+    lfh.setUint16(26, nameBytes.length, true);
+    lfh.setUint16(28, 0, true);           // extra field length
+
+    const cdh = new DataView(new ArrayBuffer(46));
+    cdh.setUint32(0, 0x02014b50, true);   // central directory header signature
+    cdh.setUint16(4, 20, true);           // version made by
+    cdh.setUint16(6, 20, true);           // version needed
+    cdh.setUint16(8, 0x0800, true);
+    cdh.setUint16(10, 0, true);
+    cdh.setUint16(12, dosTime, true);
+    cdh.setUint16(14, dosDate, true);
+    cdh.setUint32(16, crc, true);
+    cdh.setUint32(20, size, true);
+    cdh.setUint32(24, size, true);
+    cdh.setUint16(28, nameBytes.length, true);
+    cdh.setUint16(30, 0, true);           // extra
+    cdh.setUint16(32, 0, true);           // comment
+    cdh.setUint16(34, 0, true);           // disk number start
+    cdh.setUint16(36, 0, true);           // internal attrs
+    cdh.setUint32(38, 0, true);           // external attrs
+    cdh.setUint32(42, 0, true);           // offset of local header
+
+    const cdSize = 46 + nameBytes.length;
+    const cdOffset = 30 + nameBytes.length + size;
+    const eocd = new DataView(new ArrayBuffer(22));
+    eocd.setUint32(0, 0x06054b50, true);  // end of central directory signature
+    eocd.setUint16(4, 0, true);
+    eocd.setUint16(6, 0, true);
+    eocd.setUint16(8, 1, true);           // entries on this disk
+    eocd.setUint16(10, 1, true);          // total entries
+    eocd.setUint32(12, cdSize, true);
+    eocd.setUint32(16, cdOffset, true);
+    eocd.setUint16(20, 0, true);          // comment length
+
+    return new Blob([lfh.buffer, nameBytes, dataBlob, cdh.buffer, nameBytes, eocd.buffer], { type: 'application/zip' });
+  }
+
+  // ---- manifest ----
+  function buildManifest(o) {
+    return {
+      format: 'split-manifest/1',
+      created: new Date().toISOString(),
+      tool: 'split.html',
+      original_name: o.originalName,
+      original_size: o.originalSize,
+      output_name: o.outputName,
+      part_size: o.partSize,
+      part_count: o.parts.length,
+      wrapped_in_zip: !!o.wrap,
+      parts: o.parts.map(p => o.wrap
+        ? { index: p.index, name: p.name, entry: p.entry, offset: p.offset, size: p.size, sha256: p.sha256 }
+        : { index: p.index, name: p.name, offset: p.offset, size: p.size, sha256: p.sha256 }),
+    };
+  }
+
+  function manifestToText(m) {
+    const head = Object.assign({}, m);
+    delete head.parts;
+    let s = JSON.stringify(head, null, 2);
+    s = s.slice(0, -2); // "\n}" を落として parts を 1 行ずつ追加
+    return s + ',\n  "parts": [\n' + m.parts.map(p => '    ' + JSON.stringify(p)).join(',\n') + '\n  ]\n}\n';
+  }
+
+  return { fmtBytes, pad, hex, crc32, sha256, sha256js, planParts, partName, buildZipWrapper, buildManifest, manifestToText };
+})();
+if (typeof module !== 'undefined' && module.exports) module.exports = SplitCore;
+</script>
+
+<script id="split-app">
+// ===== app: UI =====
+(() => {
+  'use strict';
+  const C = SplitCore;
+  const $ = (id) => document.getElementById(id);
+  const els = {
+    drop: $('drop'), fileInput: $('file-input'), fileInfo: $('file-info'),
+    size: $('part-size'), unit: $('part-unit'),
+    fmtRaw: $('fmt-raw'), fmtZip: $('fmt-zip'), outName: $('out-name'),
+    plan: $('plan'), limitWarn: $('limit-warn'), btnSplit: $('btn-split'),
+    results: $('results'), progress: $('progress'), status: $('status'),
+    btnFolder: $('btn-folder'), btnDownloadAll: $('btn-download-all'), btnManifest: $('btn-manifest'), btnCopy: $('btn-copy'),
+    folderHint: $('folder-hint'), tbody: $('parts-body'), manifestText: $('manifest-text'),
+    cmdCat: $('cmd-cat'), cmdCopy: $('cmd-copy'), log: $('log'),
+  };
+  const UPLOAD_LIMIT = 25 * 1000 * 1000; // 25 MB (控えめに 10 進で判定)
+  const hasFsApi = typeof window.showDirectoryPicker === 'function';
+  const state = { file: null, busy: false, result: null };
+
+  const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+  function status(msg, kind) {
+    els.status.textContent = msg;
+    els.status.className = 'status' + (kind ? ' ' + kind : '');
+  }
+  function log(msg) { els.log.hidden = false; els.log.textContent += msg + '\n'; }
+  function setProgress(v, max) { els.progress.max = max || 1; els.progress.value = v; }
+
+  function partSizeBytes() {
+    const v = Number(els.size.value), u = Number(els.unit.value);
+    return (v > 0 && u > 0) ? Math.floor(v * u) : 0;
+  }
+
+  function defaultOutName(name) {
+    return /\.zip$/i.test(name) ? name.replace(/\.zip$/i, '.wfpbundle') : name;
+  }
+
+  function revokeAll() {
+    const r = state.result;
+    if (!r) return;
+    for (const p of r.parts) { try { URL.revokeObjectURL(p.url); } catch (e) {} }
+    try { URL.revokeObjectURL(r.manifestUrl); } catch (e) {}
+  }
+
+  function setFile(f) {
+    revokeAll();
+    state.file = f; state.result = null;
+    els.results.hidden = true;
+    els.tbody.innerHTML = '';
+    els.fileInfo.textContent = `${f.name} — ${C.fmtBytes(f.size)}（${f.size.toLocaleString()} bytes）`;
+    els.outName.value = defaultOutName(f.name);
+    updatePlan();
+  }
+
+  function updatePlan() {
+    const f = state.file, ps = partSizeBytes();
+    els.limitWarn.hidden = !(ps > UPLOAD_LIMIT);
+    if (!f) { els.plan.textContent = 'ファイルを選ぶとここに分割プランが出ます。'; els.btnSplit.disabled = true; return; }
+    if (!(ps > 0)) { els.plan.textContent = 'パーツサイズが不正です。'; els.btnSplit.disabled = true; return; }
+    if (f.size === 0) { els.plan.textContent = '空のファイルは分割できません。'; els.btnSplit.disabled = true; return; }
+    const plan = C.planParts(f.size, ps);
+    const last = plan.parts[plan.count - 1];
+    els.plan.innerHTML = '';
+    const b1 = document.createElement('b'); b1.textContent = f.name;
+    const b2 = document.createElement('b'); b2.textContent = `${plan.count} パーツ`;
+    els.plan.append(b1, ` (${C.fmtBytes(f.size)}) → `, b2,
+      `（各 ${C.fmtBytes(ps)} = ${ps.toLocaleString()} bytes、最後のパーツ ${C.fmtBytes(last.size)}）`);
+    if (plan.count === 1) els.plan.append(' — 分割の必要はなさそうです');
+    els.btnSplit.disabled = state.busy;
+  }
+
+  function enableSaveButtons(on) {
+    els.btnFolder.disabled = !on || !hasFsApi;
+    els.btnDownloadAll.disabled = !on;
+    els.btnManifest.disabled = !on;
+  }
+
+  function addRow(rec) {
+    const tr = document.createElement('tr');
+    tr.dataset.index = rec.index;
+    const td = (text, cls) => { const d = document.createElement('td'); d.textContent = text; if (cls) d.className = cls; return d; };
+    tr.append(td(rec.index), td(rec.name, 'name'), td(C.fmtBytes(rec.size)));
+    const h = td(rec.sha256.slice(0, 16) + '…', 'hash'); h.title = rec.sha256; tr.append(h);
+    const a = document.createElement('a'); a.href = rec.url; a.download = rec.name; a.textContent = '保存';
+    a.addEventListener('click', () => markSaved(rec.index));
+    const tda = document.createElement('td'); tda.append(a); tr.append(tda);
+    tr.append(td('', 'saved'));
+    els.tbody.append(tr);
+    tr.scrollIntoView({ block: 'nearest' });
+  }
+
+  function markSaved(index) {
+    const tr = els.tbody.querySelector(`tr[data-index="${index}"]`);
+    if (tr) tr.lastElementChild.textContent = '✓';
+  }
+
+  function triggerDownload(url, name) {
+    const a = document.createElement('a');
+    a.href = url; a.download = name; a.rel = 'noopener';
+    document.body.appendChild(a); a.click(); a.remove();
+  }
+
+  function fillCommands(f, parts, outName, wrap) {
+    const q = (s) => '"' + s.replace(/"/g, '\\"') + '"';
+    if (wrap) {
+      const stem = parts[0].name.replace(/\.part\d+\.zip$/, '');
+      els.cmdCat.textContent = `for p in ${q(stem)}.part*.zip; do unzip -p "$p"; done > ${q(outName)}`;
+      els.cmdCopy.textContent = '（ZIP包みモードは copy /b では結合できません。merge.py を使うか、各パーツを展開してから copy /b してください）';
+    } else {
+      els.cmdCat.textContent = `cat ${q(f.name)}.[0-9]* > ${q(outName)}`;
+      els.cmdCopy.textContent = `copy /b ${parts.map(p => q(p.name)).join('+')} ${q(outName)}`;
+    }
+  }
+
+  // ---- Step 2: 読み込み＋ハッシュ計算（保存はしない） ----
+  async function doSplit() {
+    if (state.busy || !state.file) return;
+    const f = state.file, ps = partSizeBytes(), wrap = els.fmtZip.checked;
+    if (!(ps > 0) || f.size === 0) return;
+    revokeAll();
+    const plan = C.planParts(f.size, ps);
+    state.busy = true; state.result = null;
+    els.btnSplit.disabled = true; enableSaveButtons(false);
+    els.results.hidden = false; els.tbody.innerHTML = ''; els.log.hidden = true; els.log.textContent = '';
+    els.manifestText.value = '';
+    setProgress(0, plan.count);
+    status(`読み込み＆ハッシュ計算中… (0/${plan.count})`);
+    const parts = [];
+    const t0 = performance.now();
+    try {
+      for (const p of plan.parts) {
+        const slice = f.slice(p.offset, p.offset + p.size);
+        const bytes = new Uint8Array(await slice.arrayBuffer());
+        if (bytes.length !== p.size) throw new Error(`パーツ ${p.index} の読み込みサイズが一致しません (${bytes.length} != ${p.size})。元ファイルが変更・移動されていませんか？`);
+        const digest = await C.sha256(bytes);
+        const entry = `${f.name}.${C.pad(p.index, plan.width)}`;
+        let name, blob;
+        if (wrap) {
+          name = C.partName(f.name, p.index, plan.width, true);
+          blob = C.buildZipWrapper(entry, slice, C.crc32(bytes), bytes.length);
+        } else {
+          name = entry; blob = slice;
+        }
+        const rec = { index: p.index, name, entry, offset: p.offset, size: p.size, sha256: digest, blob, url: URL.createObjectURL(blob) };
+        parts.push(rec);
+        addRow(rec);
+        setProgress(p.index, plan.count);
+        status(`読み込み＆ハッシュ計算中… (${p.index}/${plan.count})`);
+      }
+      const outputName = els.outName.value.trim() || f.name;
+      const manifest = C.buildManifest({ originalName: f.name, originalSize: f.size, outputName, partSize: ps, wrap, parts });
+      const manifestText = C.manifestToText(manifest);
+      const manifestBlob = new Blob([manifestText], { type: 'application/json' });
+      state.result = { parts, wrap, manifest, manifestName: `${f.name}.manifest.json`, manifestBlob, manifestUrl: URL.createObjectURL(manifestBlob) };
+      els.manifestText.value = manifestText;
+      fillCommands(f, parts, outputName, wrap);
+      const sec = ((performance.now() - t0) / 1000).toFixed(1);
+      status(`準備完了: ${parts.length} パーツ（${sec} 秒）。下のボタンで保存してください。`, 'ok');
+      enableSaveButtons(true);
+    } catch (e) {
+      status('エラー: ' + (e && e.message || e), 'err');
+      log(String(e && e.stack || e));
+    } finally {
+      state.busy = false;
+      els.btnSplit.disabled = false;
+    }
+  }
+
+  // ---- Step 3a: File System Access API でフォルダに一括保存 ----
+  async function writeFile(dir, name, blob) {
+    const fh = await dir.getFileHandle(name, { create: true });
+    const w = await fh.createWritable();
+    try { await w.write(blob); } finally { await w.close(); }
+  }
+
+  async function saveToFolder() {
+    const r = state.result;
+    if (!r || state.busy) return;
+    let dir;
+    try {
+      dir = await window.showDirectoryPicker({ mode: 'readwrite', startIn: 'downloads' });
+    } catch (e) {
+      if (e && e.name === 'AbortError') return;
+      status('フォルダを開けませんでした: ' + (e && e.message || e), 'err');
+      return;
+    }
+    state.busy = true; enableSaveButtons(false); els.btnSplit.disabled = true;
+    const total = r.parts.length + 1;
+    try {
+      setProgress(0, total);
+      let n = 0;
+      for (const p of r.parts) {
+        status(`フォルダに書き込み中… ${p.name} (${n + 1}/${total})`);
+        await writeFile(dir, p.name, p.blob);
+        markSaved(p.index);
+        setProgress(++n, total);
+      }
+      await writeFile(dir, r.manifestName, r.manifestBlob);
+      setProgress(++n, total);
+      status(`保存完了: ${r.parts.length} パーツ + ${r.manifestName} を「${dir.name}」に書き込みました。このフォルダの中身を全部アップロードしてください。`, 'ok');
+    } catch (e) {
+      status('書き込みエラー: ' + (e && e.message || e), 'err');
+      log(String(e && e.stack || e));
+    } finally {
+      state.busy = false; enableSaveButtons(true); els.btnSplit.disabled = false;
+    }
+  }
+
+  // ---- Step 3b: 順番にダウンロード（フォールバック） ----
+  async function downloadAll() {
+    const r = state.result;
+    if (!r || state.busy) return;
+    state.busy = true; enableSaveButtons(false); els.btnSplit.disabled = true;
+    try {
+      status('順番にダウンロード中… ブラウザが「複数ファイルのダウンロードを許可しますか？」と聞いてきたら許可してください。');
+      setProgress(0, r.parts.length + 1);
+      triggerDownload(r.manifestUrl, r.manifestName);
+      setProgress(1, r.parts.length + 1);
+      await sleep(1000);
+      let n = 1;
+      for (const p of r.parts) {
+        triggerDownload(p.url, p.name);
+        markSaved(p.index);
+        setProgress(++n, r.parts.length + 1);
+        await sleep(800);
+      }
+      status(`ダウンロードを ${r.parts.length} パーツ + manifest ぶん開始しました。ダウンロードフォルダに ${r.parts.length} 個そろっているか確認してください（足りない分は表の「保存」から個別に）。`, 'ok');
+    } finally {
+      state.busy = false; enableSaveButtons(true); els.btnSplit.disabled = false;
+    }
+  }
+
+  async function copyManifest() {
+    const text = els.manifestText.value;
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch (e) {
+      els.manifestText.focus(); els.manifestText.select();
+      try { document.execCommand('copy'); } catch (e2) {}
+    }
+    const old = els.btnCopy.textContent;
+    els.btnCopy.textContent = 'コピーしました';
+    setTimeout(() => { els.btnCopy.textContent = old; }, 1500);
+  }
+
+  // ---- events ----
+  ['dragenter', 'dragover'].forEach(ev => els.drop.addEventListener(ev, e => { e.preventDefault(); els.drop.classList.add('over'); }));
+  ['dragleave', 'drop'].forEach(ev => els.drop.addEventListener(ev, e => { e.preventDefault(); els.drop.classList.remove('over'); }));
+  els.drop.addEventListener('drop', e => { const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]; if (f) setFile(f); });
+  els.drop.addEventListener('click', () => els.fileInput.click());
+  els.fileInput.addEventListener('change', () => { const f = els.fileInput.files && els.fileInput.files[0]; if (f) setFile(f); });
+  // ページ全体へのドロップでブラウザがファイルを開いてしまうのを防ぐ
+  window.addEventListener('dragover', e => e.preventDefault());
+  window.addEventListener('drop', e => e.preventDefault());
+
+  els.size.addEventListener('input', updatePlan);
+  els.unit.addEventListener('change', updatePlan);
+  document.querySelectorAll('[data-preset]').forEach(b => b.addEventListener('click', () => { els.size.value = b.dataset.preset; updatePlan(); }));
+  els.btnSplit.addEventListener('click', doSplit);
+  els.btnFolder.addEventListener('click', saveToFolder);
+  els.btnDownloadAll.addEventListener('click', downloadAll);
+  els.btnManifest.addEventListener('click', () => { const r = state.result; if (r) triggerDownload(r.manifestUrl, r.manifestName); });
+  els.btnCopy.addEventListener('click', copyManifest);
+
+  if (!hasFsApi) {
+    els.btnFolder.title = 'このブラウザは File System Access API に未対応です（Chrome / Edge で開くと使えます）';
+    els.folderHint.textContent = 'このブラウザではフォルダ一括保存が使えないため「全部ダウンロード」を使ってください。「複数ファイルのダウンロードを許可しますか？」と聞かれたら許可を。取りこぼした分は表の「保存」リンクから個別に落とせます。';
+  }
+  updatePlan();
+})();
+</script>
+</body>
+</html>
