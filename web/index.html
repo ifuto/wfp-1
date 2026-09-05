@@ -146,6 +146,20 @@
   function withTimeout(p, ms, label) {
     return Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error(label || "タイムアウト")), ms))]);
   }
+  // moovは先頭にあることが多いので、ファイル全体ではなく先頭256KBだけ読んで映像トラック情報を得る
+  async function inspectHead(blob) {
+    try {
+      const head = await blob.slice(0, 262144).arrayBuffer();
+      const t = WM.inspect(head).tracks.find((x) => x.handler === "vide") || null;
+      if (t && t.codec) return t;
+    } catch (e) {}
+    const ab = await blob.arrayBuffer();
+    return WM.inspect(ab).tracks.find((x) => x.handler === "vide") || null;
+  }
+  let wakeLock = null;
+  async function keepAwake() {
+    try { if (navigator.wakeLock && !wakeLock) wakeLock = await navigator.wakeLock.request("screen"); } catch (e) {}
+  }
   async function waitEncoderDrain(enc, ms) {
     const t0 = Date.now();
     while (enc.encodeQueueSize > 0 && enc.state === "configured") {
@@ -462,6 +476,10 @@
     v.muted = true;
     v.playsInline = true;
     v.preload = "auto";
+    // iOS(特にアプリ内WebView)はDOMに繋がっていないvideoを再生させないことがあるため、
+    // 画面外に1pxで取り付ける
+    v.style.cssText = "position:fixed;left:-2px;top:-2px;width:1px;height:1px;opacity:0.01;pointer-events:none;";
+    document.body.appendChild(v);
     v.src = url;
     try {
       await withTimeout(new Promise((res, rej) => {
@@ -517,10 +535,20 @@
       // 再生してリアルタイムキャプチャ（失敗したらシークステップにフォールバック）
       let playing = false;
       try { await withTimeout(v.play(), 5000, "playタイムアウト"); playing = true; } catch (e) { playing = false; }
+      phase(playing ? "再生開始OK" : "再生開始できず");
 
+      let captureOk = false;
       if (playing) {
         const raf = () => new Promise((r) => requestAnimationFrame(r));
+        let lastT = -1, lastMove = Date.now(), lastBeat = 0;
         while (!v.ended && !v.paused && v.currentTime < clip.out - 0.004) {
+          const now = Date.now();
+          if (v.currentTime > lastT + 0.002) { lastT = v.currentTime; lastMove = now; }
+          else if (now - lastMove > 4000) {
+            phase("⚠ 再生が停滞（t=" + v.currentTime.toFixed(2) + "s）— シークステップモードへ切替");
+            break;
+          }
+          if (now - lastBeat > 2000) { lastBeat = now; phase("キャプチャ中 t=" + v.currentTime.toFixed(2) + "s / " + clip.out.toFixed(2) + "s (" + nTicks + "f)"); }
           const elapsed = v.currentTime - clip.in;
           draw();
           while (nTicks < elapsed / tick && nTicks < totalTicks) {
@@ -531,7 +559,26 @@
           await raf();
         }
         try { v.pause(); } catch (e) {}
-        phase("再生キャプチャ終了 " + nTicks + "/" + totalTicks + "フレーム");
+        captureOk = nTicks >= totalTicks || v.ended;
+        phase("再生キャプチャ終了 " + nTicks + "/" + totalTicks + "フレーム" + (captureOk ? "" : "（未完 — 補完します）"));
+        if (!captureOk) {
+          // 停滞した時点のフレームから、残りをシークで補完
+          for (let t = Math.max(0, nTicks * tick); t < clipDur; t += 1 / 60) {
+            const target = Math.min(clip.in + t, clip.out - 0.004);
+            await withTimeout(new Promise((res, rej) => {
+              const to = setTimeout(() => rej(new Error("シークタイムアウト")), 8000);
+              v.addEventListener("seeked", () => { clearTimeout(to); res(); }, { once: true });
+              try { v.currentTime = target + 0.0005; } catch (e) { clearTimeout(to); rej(e); }
+            }), 10000, "シークタイムアウト").catch(() => {});
+            if (v.readyState >= 2) await sleep(30);
+            draw();
+            while (nTicks < t + 1 / 60 && nTicks < totalTicks) {
+              emitTick();
+              if (encoder.encodeQueueSize > 24) await sleep(2);
+            }
+            progressCb(Math.min(nTicks, totalTicks), totalTicks);
+          }
+        }
       } else {
         phase("再生開始できず — シークステップモードで実行（低速）");
         const step = 1 / 60;
@@ -560,6 +607,7 @@
       return { emitted: nTicks };
     } finally {
       try { v.pause(); v.removeAttribute("src"); v.load(); } catch (e) {}
+      try { v.remove(); } catch (e) {}
       URL.revokeObjectURL(url);
     }
   }
@@ -669,6 +717,7 @@
     running = true;
     startBtn.disabled = true;
     result.classList.add("hidden");
+    await keepAwake();
 
     const { w, h, fps } = sel;
     const encCfg = await pickEncoderConfig(w, h, fps);
@@ -720,12 +769,13 @@
     for (const c of clips) {
       const blob0 = blobs.get(c.guid);
       if (!blob0) continue;
-      const ab0 = await blob0.arrayBuffer();
-      const vt0 = WM.inspect(ab0).tracks.find((t) => t.handler === "vide");
+      const vt0 = await inspectHead(blob0);
       if (vt0 && vt0.codec) guidCodec.set(c.guid, vt0.codec);
       if (!vt0 || !vt0.codec || probed.has(vt0.codec)) continue;
       probed.add(vt0.codec);
       setProg(0.08, "コーデック動作確認: " + vt0.codec);
+      // 実デコード試験のためにこの1ファイルだけ全体を読む
+      const ab0 = await blob0.arrayBuffer();
       const ok = await probeDecode(ab0, vt0);
       if (!ok) fallbackCodecs.add(vt0.codec);
       phase("プローブ " + vt0.codec + ": " + (ok ? "WebCodecs OK" : "NG → 互換モード"));
