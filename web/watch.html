@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#0f1117">
-<title>🎬 完成動画を視聴（分割結合ストリーミング）</title>
+<title>🎬 完成動画を視聴（分割ストリーミング）</title>
 <style>
   :root { --bg:#0f1117; --card:#181b24; --border:#2a2f3d; --text:#e8eaf0; --sub:#9aa1b5; --accent:#4f8cff; --accent2:#3ddc97; }
   * { box-sizing:border-box; }
@@ -24,8 +24,6 @@
   .preset.sel { border-color:var(--accent2); background:#14231c; }
   .preset .res { font-size:17px; font-weight:800; }
   .preset .note { font-size:11px; color:var(--sub); }
-  .bar { height:14px; background:#10131b; border-radius:8px; overflow:hidden; margin:10px 0 6px; }
-  .bar > div { height:100%; width:0; background:linear-gradient(90deg,var(--accent),var(--accent2)); transition:width .2s; }
   .status { font-size:13px; color:var(--sub); }
   .status b { color:var(--text); }
   .log { background:#10131b; border:1px solid var(--border); border-radius:8px; padding:8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--sub); white-space:pre-wrap; max-height:110px; overflow:auto; margin-top:8px; }
@@ -36,20 +34,20 @@
 </head>
 <body>
 <div class="wrap">
-  <h1>🎬 完成動画を視聴 <span style="font-size:11px;color:#5a6275;font-weight:400">build w1</span></h1>
-  <p class="sub">リポジトリに分割格納された .bin パーツをブラウザで取得・結合して再生します（GitHub Pages 配信・サーバー不要）。<br>
-  💡 <b>ストリーミング再生対応環境</b>では全部のダウンロードを待たずに再生が始まります。</p>
+  <h1>🎬 完成動画を視聴 <span style="font-size:11px;color:#5a6275;font-weight:400">build w2</span></h1>
+  <p class="sub">リポジトリに分割格納された .bin パーツを <b>Service Worker</b> 経由でRange ストリーミング再生します（GitHub Pages 配信・サーバー不要・メモリやさしい）。</p>
 
   <div class="card">
     <h2>① 品質を選択</h2>
     <div class="presets" id="presets">
-      <div class="preset sel" data-dir="4k120"><div class="res">4K 120fps</div><div class="note">1.27GB ・ 19パート</div></div>
-      <div class="preset" data-dir="1080p60"><div class="res">1080p 60fps</div><div class="note">469MB ・ 7パート</div></div>
+      <div class="preset sel" data-dir="4k120"><div class="res">4K 120fps</div><div class="note">1.27GB ・ ストリーミング</div></div>
+      <div class="preset" data-dir="1080p60"><div class="res">1080p 60fps</div><div class="note">469MB ・ 無難</div></div>
     </div>
-    <button class="green big" id="startBtn">▶︎ 読み込んで再生</button>
-    <div class="bar hidden" id="bar"><div id="barFill"></div></div>
-    <div class="status" id="prog">待機中</div>
+    <button class="green big" id="startBtn">▶︎ 再生開始</button>
+    <div class="status" id="prog" style="margin-top:8px">待機中</div>
     <div class="log hidden" id="log"></div>
+    <div class="warn">📱 iPhoneで4K120が「再生できません」になる場合、H.264の4K120デコードが端末仕様を超えている可能性があります → <b>1080p60</b> をご利用ください（4Kファイル自体はダウンロード可）。<br>
+    Service Worker非対応環境では従来どおり分割取得→結合モードにフォールバックします。</div>
   </div>
 
   <div class="card hidden" id="playerCard">
@@ -57,16 +55,16 @@
     <video id="player" controls playsinline preload="none"></video>
     <div class="status" style="margin-top:8px" id="meta"></div>
     <button class="green big" id="dlBtn" style="margin-top:10px">⬇️ MP4としてダウンロード/保存</button>
-    <div class="status" style="margin-top:6px">iOSは共有シート →「"ファイル"に保存」/「ビデオを保存」。</div>
+    <div class="status" style="margin-top:6px">iOSは共有シート →「"ファイル"に保存」。SWモード中はメモリに優しい逐次保存になります。</div>
   </div>
 
   <div class="card">
     <h2>ℹ️ 仕組み</h2>
     <div class="status">
-      <code>video/&lt;品質&gt;/manifest.json</code> と <code>video.part*.bin</code>（64MB毎）をfetchで取得 →
-      MediaSource Extensions が使える環境は逐次 appendBuffer でストリーミング再生、
-      使えない環境は全パート結合→Blob URL で再生・保存。パーツのSHA-256も検証します。
-      元の編集: Filmora（BGM: Poker Face）→ サーバー側ffmpegでレンダリング済み。
+      Service Worker が <code>stream.mp4</code> という仮想URLを提供し、video要素の Range リクエスト（「このバイト範囲だけ」）に応じて
+      <code>video/&lt;品質&gt;/video.part*.bin</code>（64MB分割・SHA-256付きmanifest）から必要スライスだけを切り出して返します。
+      1リクエスト最大16MBなのでメモリ使用量は常に小さく、全ダウンロード完了を待たずに再生が始まります。
+      元の編集: Filmora（BGM: Poker Face）→ ffmpeg でレンダリング済み。
     </div>
   </div>
 </div>
@@ -75,11 +73,10 @@
 (function () {
   "use strict";
   const $ = (id) => document.getElementById(id);
-  const presets = $("presets"), startBtn = $("startBtn");
-  const bar = $("bar"), barFill = $("barFill"), prog = $("prog"), logBox = $("log");
+  const presets = $("presets"), startBtn = $("startBtn"), prog = $("prog"), logBox = $("log");
   const playerCard = $("playerCard"), player = $("player"), meta = $("meta"), dlBtn = $("dlBtn");
-  let dir = "4k120", running = false, abort = false;
-  const cache = new Map(); // dir -> {chunks:[], size}
+  let dir = "4k120", running = false;
+  let swOK = false;
 
   presets.addEventListener("click", (e) => {
     const el = e.target.closest(".preset");
@@ -91,7 +88,6 @@
 
   function esc(s) { return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
   function fmt(n) { return n >= 1048576 ? (n / 1048576).toFixed(1) + " MB" : (n / 1024).toFixed(0) + " KB"; }
-  function setBar(f) { barFill.style.width = (Math.max(0, Math.min(1, f)) * 100).toFixed(1) + "%"; }
   function phase(m) {
     logBox.classList.remove("hidden");
     const lines = logBox.textContent.split("\n");
@@ -100,40 +96,31 @@
     logBox.textContent = lines.join("\n");
     logBox.scrollTop = logBox.scrollHeight;
   }
-  async function sha256hex(buf) {
-    if (!(crypto && crypto.subtle)) return null;
-    const d = await crypto.subtle.digest("SHA-256", buf);
-    return [...new Uint8Array(d)].map((b) => b.toString(16).padStart(2, "0")).join("");
-  }
 
-  async function fetchParts(onPart) {
-    const base = new URL("../video/" + dir + "/", location.href).href;
-    phase("manifest取得: " + base + "manifest.json");
-    const man = await (await fetch(base + "manifest.json", { cache: "no-store" })).json();
-    phase("manifest OK: " + man.totalParts + "パート / 計 " + fmt(man.totalSize));
-    let got = 0; const t0 = Date.now();
-    for (let i = 0; i < man.parts.length; i++) {
-      if (abort) throw new Error("中止されました");
-      const p = man.parts[i];
-      const r = await fetch(base + p.file);
-      if (!r.ok) throw new Error("HTTP " + r.status + " " + p.file);
-      const buf = await r.arrayBuffer();
-      got += buf.byteLength;
-      const sec = (Date.now() - t0) / 1000;
-      const speed = sec > 0 ? got / sec : 0;
-      setBar(got / man.totalSize);
-      prog.innerHTML = "パート " + (i + 1) + "/" + man.totalParts + " ・ <b>" + (got / man.totalSize * 100).toFixed(1) + "%</b> ・ " + fmt(speed) + "/s";
-      const h = await sha256hex(buf);
-      if (h && p.sha256 && h !== p.sha256) {
-        phase("⚠ SHA-256不一致: " + p.file + "（再試行）");
-        i--; got -= buf.byteLength; continue;
+  (async function initSW() {
+    if ("serviceWorker" in navigator) {
+      try {
+        await navigator.serviceWorker.register("sw.js");
+        await navigator.serviceWorker.ready;
+        swOK = true;
+        prog.innerHTML = "✅ Service Worker 準備完了 — 「再生開始」を押してください";
+      } catch (e) {
+        phase("SW登録失敗: " + (e.message || e) + " — フォールバックモードで動作します");
       }
-      phase("OK " + p.file + " (" + fmt(buf.byteLength) + ")");
-      const stop = await onPart(buf, i, man);
-      if (stop) return man;
+    } else {
+      phase("このブラウザはService Worker非対応 — フォールバックモードで動作します");
     }
-    return man;
-  }
+  })();
+
+  player.addEventListener("error", () => {
+    if (running) {
+      phase("⚠ 再生エラー — この品質はこの端末では再生できない可能性があります（4K120のH.264デコード上限超過など）。1080p60をお試しください");
+      prog.innerHTML = "⚠ 再生エラー（上のログ参照）。1080p60に切り替えて再試行を。";
+      running = false; startBtn.disabled = false;
+    }
+  });
+  player.addEventListener("waiting", () => phase("…バッファリング中（パート取得中）"));
+  player.addEventListener("playing", () => phase("▶︎ 再生中"));
 
   startBtn.addEventListener("click", () => main().catch((e) => {
     running = false; startBtn.disabled = false;
@@ -142,115 +129,61 @@
 
   async function main() {
     if (running) return;
-    running = true; abort = false;
+    running = true;
     startBtn.disabled = true;
-    bar.classList.remove("hidden");
     playerCard.classList.remove("hidden");
     playerCard.scrollIntoView({ behavior: "smooth", block: "nearest" });
 
-    // 既に読み込み済みなら即再生
-    const cached = cache.get(dir);
-    const useMSE = typeof MediaSource !== "undefined" &&
-      MediaSource.isTypeSupported('video/mp4; codecs="avc1.640034, mp4a.40.2"');
+    const streamURL = "stream.mp4?dir=" + dir + "&v=" + Date.now();
 
-    if (cached) {
-      player.src = cached.url;
-      meta.textContent = "読み込み済み (" + fmt(cached.size) + ") — 再生開始";
-      await player.play().catch(() => {});
+    if (swOK) {
+      phase("SWストリーミング mode: " + streamURL);
+      player.src = streamURL;
+      meta.textContent = "Service Worker ストリーミング — 読み込みしながら再生";
+      dlBtn.onclick = () => {
+        const a = document.createElement("a");
+        a.href = streamURL;
+        a.download = dir === "4k120" ? "wfp-render_3840x2160@120.mp4" : "wfp-render_1920x1080@60.mp4";
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        phase("ダウンロード要求（SW経由で逐次保存）");
+      };
+      try { await player.play(); phase("▶︎ 再生開始"); } catch (e) { phase("自動再生待ち（再生ボタンを押してください）"); }
       running = false; startBtn.disabled = false;
       return;
     }
 
-    if (useMSE) {
-      phase("MediaSourceストリーミング mode");
-      const ms = new MediaSource();
-      player.src = URL.createObjectURL(ms);
-      await new Promise((res) => ms.addEventListener("sourceopen", res, { once: true }));
-      const sb = ms.addSourceBuffer('video/mp4; codecs="avc1.640034, mp4a.40.2"');
-      sb.mode = "sequence";
-      const chunks = [];
-      let appended = 0, started = false, msError = false;
-      sb.addEventListener("error", () => { msError = true; phase("⚠ SourceBufferエラー（Blobモードへ切替可）"); });
-      const append = (buf) => new Promise((res, rej) => {
-        const t = setTimeout(() => rej(new Error("appendBufferタイムアウト")), 30000);
-        sb.addEventListener("updateend", function on() { sb.removeEventListener("updateend", on); clearTimeout(t); res(); }, { once: true });
-        try { sb.appendBuffer(buf); } catch (e) { clearTimeout(t); rej(e); }
-      });
-      try {
-        await fetchParts(async (buf, i, man) => {
-          chunks.push(buf);
-          await append(buf);
-          appended++;
-          if (!started && (appended >= 2 || i === man.parts.length - 1)) {
-            started = true;
-            phase("▶︎ 再生開始（残りはバックグラウンドで取得続行）");
-            player.play().catch(() => {});
-          }
-          return msError; // エラー時は取得ループ終了→Blobへ
-        });
-        if (!msError) {
-          if (ms.readyState === "open") ms.endOfStream();
-          meta.textContent = "✅ 全パート取得・再生可能（ストリーミング）";
-          cache.set(dir, { url: player.src, size: 0 });
-          dlMode();
-          running = false; startBtn.disabled = false;
-          return;
-        }
-      } catch (e) {
-        phase("⚠ MSE中断: " + (e.message || e) + " — Blobモードで再構築");
-      }
-      // MSE失敗: 持ってるチャンクからBlob再生（不足分は再取得）
-      await blobMode(chunks);
-    } else {
-      phase("MediaSource非対応 — Blobモード（全取得後に再生）");
-      await blobMode([]);
+    // ---- フォールバック: 分割取得 → Blob（従来方式） ----
+    phase("フォールバック: 分割取得モード");
+    const base = new URL("../video/" + dir + "/", location.href).href;
+    const man = await (await fetch(base + "manifest.json", { cache: "no-store" })).json();
+    phase("manifest OK: " + man.totalParts + "パート / " + fmt(man.totalSize));
+    const chunks = [];
+    let got = 0; const t0 = Date.now();
+    for (let i = 0; i < man.parts.length; i++) {
+      const p = man.parts[i];
+      const r = await fetch(base + p.file);
+      if (!r.ok) throw new Error("HTTP " + r.status + " " + p.file);
+      const buf = await r.arrayBuffer();
+      chunks.push(buf);
+      got += buf.byteLength;
+      const sec = (Date.now() - t0) / 1000;
+      prog.innerHTML = "パート " + (i + 1) + "/" + man.totalParts + " ・ <b>" + (got / man.totalSize * 100).toFixed(0) + "%</b> ・ " + fmt(sec > 0 ? got / sec : 0) + "/s";
+      phase("OK " + p.file);
     }
-
-    async function blobMode(existing) {
-      let chunks = existing.slice();
-      let have = chunks.reduce((a, c) => a + c.byteLength, 0);
-      if (have === 0) {
-        const man = await fetchParts(async (buf) => { chunks.push(buf); return false; });
-        const blob = new Blob(chunks, { type: "video/mp4" });
-        const url = URL.createObjectURL(blob);
-        player.src = url;
-        cache.set(dir, { url, size: blob.size });
-        meta.textContent = "✅ 読み込み完了 (" + fmt(blob.size) + ") — 再生開始";
-        dlMode(blob, url, man);
-        await player.play().catch(() => {});
-      } else {
-        // MSEで途中まで取得済み: 簡易化のため全て再取得してBlob化
-        chunks = [];
-        const man = await fetchParts(async (buf) => { chunks.push(buf); return false; });
-        const blob = new Blob(chunks, { type: "video/mp4" });
-        const url = URL.createObjectURL(blob);
-        player.src = url;
-        cache.set(dir, { url, size: blob.size });
-        meta.textContent = "✅ 読み込み完了 (" + fmt(blob.size) + ")";
-        dlMode(blob, url, man);
-        await player.play().catch(() => {});
-      }
-      running = false; startBtn.disabled = false;
-    }
-    function dlMode(blob, url, man) {
-      dlBtn.onclick = async () => {
-        if (!blob) {
-          phase("ダウンロード用に全パート再構築中…");
-          const chunks = [];
-          blob = await (async () => {
-            await fetchParts(async (buf) => { chunks.push(buf); return false; });
-            return new Blob(chunks, { type: "video/mp4" });
-          })();
-          url = URL.createObjectURL(blob);
-        }
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = (man && man.originalName) || "wfp-render.mp4";
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-      };
-    }
+    const blob = new Blob(chunks, { type: "video/mp4" });
+    const url = URL.createObjectURL(blob);
+    player.src = url;
+    meta.textContent = "✅ 読み込み完了 (" + fmt(blob.size) + ")";
+    dlBtn.onclick = () => {
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = (dir === "4k120" ? "wfp-render_3840x2160@120.mp4" : "wfp-render_1920x1080@60.mp4");
+      document.body.appendChild(a); a.click(); a.remove();
+    };
+    await player.play().catch(() => {});
+    running = false; startBtn.disabled = false;
   }
 })();
 </script>
