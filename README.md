@@ -46,3 +46,15 @@ Filmora独自のエフェクト・テキスト・ステッカー・トランジ�
 - `tools/uploader/` — サンドボックス内アップロード受付サーバー（チャット制限回避用）
 - `tools/render/` — サンドボックス内レンダラー（サーバー側ffmpeg）
 - `file-splitter.html` — ブラウザ内ファイル分割ツール（iOS対応）
+
+## WFP形式の解剖 & フル再現エンジン (2026-09-06)
+
+- `docs/wfp-format.md` — 実プロジェクトを解析したWFP編集データ形式の完全記録
+  （.wfpbundle→.wfp→timeline.wesproj の入れ子、100ns時刻単位、trackType/trackTag、
+  type-8効果クリップ、transform (Position 0.5=中央/Scale%)、postTransition、speedParam等）
+- exeレンダラーはこれを全て読み、**多レイヤー画像（位置・倍率）・フィルター25種・
+  トランジション7種（xfade相当）・音声フェード・末尾フェード・心拍ズーム**まで再現。
+  Filmora純正素材動画を使うオーバーレイ系効果は色調・グレインで近似。
+- 既知のffmpeg静的ビルドバグ: libx264でVBV (-maxrate+-bufsize) を付けると zoompan の
+  フレームカウンタが固まる → zoompanセグメントはVBVを外して対応済み。
+

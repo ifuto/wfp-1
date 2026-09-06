@@ -170,7 +170,285 @@ async function parseProject(bundlePath) {
   const mediaMap = Z.mediaMapFromEntries([...entries.keys(), ...[...wentries.keys()].map((n) => n.replace(/^ProjectFolder\//, ""))]);
   const tl = JSON.parse(td.decode(await (await Z.extractEntry(wsrc, wentries, "ProjectFolder/Medias/" + pinfo.timeline_mediaId + "/timeline.wesproj")).arrayBuffer()));
   const parsed = Z.parseTimeline(tl, mediaMap);
-  return { src, entries, pinfo, mediaMap, parsed };
+  return { src, entries, pinfo, mediaMap, parsed, rawTl: tl };
+}
+
+/* ============== WFP deep features: layers / filters / transitions ============== */
+const IMG_EXT = /\.(jpe?g|png|webp|gif|bmp)$/i;
+const VID_EXT = /\.(mp4|mov|mkv|webm|avi|m4v|ts|3gp)$/i;
+
+function fxParam(e, name) {
+  const p = (e.paramList || []).find((x) => x.name === name);
+  return p ? p.fxParam.unValue : null;
+}
+
+/* position/scale of a clip (Filmora transform effect; 0.5=center, 100=fit) */
+function clipTransform(c) {
+  for (const ch of c.effectChainList || []) {
+    for (const e of ch.effectList || []) {
+      if (e.id !== "video/effect/transform") continue;
+      if (fxParam(e, "EnableTransform") === 0) return null;
+      const px = fxParam(e, "Position_x"), py = fxParam(e, "Position_y");
+      const sx = fxParam(e, "Scale_x"), sy = fxParam(e, "Scale_y");
+      if ((px != null && Math.abs(px - 0.5) > 1e-4) || (py != null && Math.abs(py - 0.5) > 1e-4) ||
+          (sx != null && Math.abs(sx - 100) > 1e-4) || (sy != null && Math.abs(sy - 100) > 1e-4)) {
+        return { px: px == null ? 0.5 : px, py: py == null ? 0.5 : py, sx: sx == null ? 100 : sx, sy: sy == null ? 100 : sy };
+      }
+    }
+  }
+  return null;
+}
+
+/* the Filmora stock effect (GUID id) carried by a clip, if any */
+function stockEffectOf(c) {
+  for (const ch of c.effectChainList || []) {
+    for (const e of ch.effectList || []) {
+      if (/^(video|audio)\/effect\//.test(e.id)) continue;
+      return e.display || e.id;
+    }
+  }
+  return null;
+}
+
+/* Filmora filter name -> ffmpeg filter chain (visual approximation) */
+function filmoraFilterChain(name, W, H) {
+  const n = String(name);
+  if (/fashion photography/i.test(n)) return ["eq=contrast=1.12:saturation=1.18", "colorbalance=rs=-0.05:bs=0.06:rh=0.04:bh=-0.05"];
+  if (/retro/i.test(n)) return ["eq=contrast=1.06:saturation=0.85:gamma=0.98", "colorbalance=rm=0.03:gm=0.01:bm=-0.04", "vignette=PI/5", "noise=alls=8:allf=t"];
+  if (/old\s*video/i.test(n)) return ["eq=saturation=0.55:contrast=1.10", "vignette=PI/4", "noise=alls=18:allf=t"];
+  if (/extreme/i.test(n)) return ["eq=contrast=1.22:saturation=1.35", "vignette=PI/5"];
+  if (/mild/i.test(n)) return ["eq=contrast=1.04:saturation=1.06"];
+  if (/neon|neno/i.test(n)) return ["eq=saturation=1.45:contrast=1.10", "unsharp=5:5:1.2"];
+  if (/chaos\s*2/i.test(n)) return ["rgbashift=rh=-5:bh=5", "eq=contrast=1.12:saturation=1.15", "noise=alls=12:allf=t"];
+  if (/chaos\s*1/i.test(n)) return ["rgbashift=rh=-3:bh=3", "eq=contrast=1.08:saturation=1.10", "noise=alls=8:allf=t"];
+  if (/cinema\s*21/i.test(n)) {
+    const bar = Math.round((H - Math.round(W / 2.39)) / 2);
+    return bar > 4 ? ["drawbox=x=0:y=0:w=" + W + ":h=" + bar + ":color=black:t=fill",
+      "drawbox=x=0:y=" + (H - bar) + ":w=" + W + ":h=" + bar + ":color=black:t=fill"] : [];
+  }
+  if (/horror/i.test(n)) return ["eq=contrast=1.15:brightness=-0.03:saturation=0.85", "colorbalance=rm=0.05:bm=0.03", "vignette=PI/3", "noise=alls=14:allf=t"];
+  if (/halloween/i.test(n)) return ["colorbalance=rm=0.06:bm=0.08", "eq=saturation=1.25:contrast=1.10", "noise=alls=10:allf=t"];
+  if (/glitter|overlay/i.test(n)) return ["eq=saturation=1.15:contrast=1.06", "unsharp=5:5:0.8"];
+  if (/up-?down|swing|bounce/i.test(n)) return ["eq=contrast=1.03:saturation=1.04"];
+  return ["eq=contrast=1.05:saturation=1.08"];
+}
+
+function xfadeKind(name) {
+  const n = String(name);
+  if (/wipe.*right/i.test(n)) return "wiperight";
+  if (/glitch\s*intro/i.test(n)) return "hblur";
+  if (/glitch/i.test(n)) return "pixelize";
+  if (/zoom/i.test(n)) return "zoomin";
+  if (/roll/i.test(n)) return "slideleft";
+  return "fade";
+}
+
+/* full timeline decode: base layer, image/video overlays, filter events, transitions */
+function deepParse(tl, mediaByGuid) {
+  const Z = globalThis.__ZIPLITE__;
+  const T = 1e7;
+  const info = tl.timelineInfos[0];
+  const vTracks = info.trackInfos
+    .filter((tr) => tr.trackType === 1)
+    .sort((a, b) => (a.trackTag == null ? 0 : a.trackTag) - (b.trackTag == null ? 0 : b.trackTag));
+  const mediaOf = (c) => { const g = Z.guidOf(c); return g ? mediaByGuid.get(g) : null; };
+  const isMedia = (c) => c.type === 1 && (() => { const m = mediaOf(c); return !!m && (VID_EXT.test(m.name) || IMG_EXT.test(m.name)); })();
+  let baseTag = null;
+  for (const tr of vTracks) {
+    if ((tr.clipList || []).some(isMedia)) { baseTag = tr.trackTag == null ? 0 : tr.trackTag; break; }
+  }
+  const base = [], overlays = [], filterEvents = [], transitions = [], audioFades = [];
+  for (const tr of vTracks) {
+    const tag = tr.trackTag == null ? 0 : tr.trackTag;
+    for (const c of tr.clipList || []) {
+      if (isMedia(c) && tag === baseTag) {
+        base.push({ name: mediaOf(c).name, guid: Z.guidOf(c), in: c.inPoint / T, out: c.outPoint / T,
+          tl0: c.tlBegin / T, tl1: c.tlEnd / T, transform: clipTransform(c), pt: c.postTransition || null });
+        const de0 = stockEffectOf(c);
+        if (de0) filterEvents.push({ tl0: c.tlBegin / T, tl1: c.tlEnd / T, tag: baseTag, name: de0 });
+      } else if (isMedia(c)) {
+        overlays.push({ name: mediaOf(c).name, guid: Z.guidOf(c), in: c.inPoint / T, out: c.outPoint / T,
+          tl0: c.tlBegin / T, tl1: c.tlEnd / T, transform: clipTransform(c), tag });
+        const de = stockEffectOf(c);
+        if (de) filterEvents.push({ tl0: c.tlBegin / T, tl1: c.tlEnd / T, tag: tag + 0.5, name: de });
+      } else if (c.type === 8) {
+        const de = stockEffectOf(c);
+        if (de) filterEvents.push({ tl0: c.tlBegin / T, tl1: c.tlEnd / T, tag, name: de });
+      } else if (c.type === 1) {
+        const de = stockEffectOf(c);
+        if (de) filterEvents.push({ tl0: c.tlBegin / T, tl1: c.tlEnd / T, tag: baseTag == null ? tag : baseTag, name: de });
+      }
+    }
+  }
+  base.sort((a, b) => a.tl0 - b.tl0);
+  for (const b of base) {
+    const pt = b.pt;
+    if (pt && pt.tlEnd > pt.tlBegin && !/audio fade/i.test(String(pt.display))) {
+      transitions.push({ t0: pt.tlBegin / T, t1: pt.tlEnd / T, cut: (pt.tlBegin + pt.tlEnd) / (2 * T),
+        kind: xfadeKind(pt.display), name: String(pt.display) });
+    }
+  }
+  for (const tr of info.trackInfos) {
+    if (tr.trackType !== 2) continue;
+    for (const c of tr.clipList || []) {
+      const pt = c.postTransition;
+      if (pt && /audio fade/i.test(String(pt.display))) {
+        audioFades.push({ t0: pt.tlBegin / T, t1: pt.tlEnd / T, cut: (pt.tlBegin + pt.tlEnd) / (2 * T) });
+      }
+    }
+  }
+  let dur = base.reduce((m, b) => Math.max(m, b.tl1), 0);
+  for (const t of transitions) dur = Math.max(dur, t.t1);
+  base.forEach((b) => { delete b.pt; });
+  overlays.sort((a, b) => a.tl0 - b.tl0);
+  filterEvents.sort((a, b) => a.tl0 - b.tl0);
+  return {
+    fps: info.frameRate.num / Math.max(1, info.frameRate.den),
+    W: info.resolutionWidth, H: info.resolutionHeight, dur,
+    base, overlays, filterEvents, transitions, audioFades,
+  };
+}
+
+/* split timeline into atomic segments at every event edge */
+function buildSegments(dp) {
+  const eps = 1e-4;
+  const edges = new Set([0, dp.dur]);
+  for (const b of dp.base) { edges.add(b.tl0); edges.add(b.tl1); }
+  for (const o of dp.overlays) { edges.add(o.tl0); edges.add(o.tl1); }
+  for (const f of dp.filterEvents) { edges.add(f.tl0); edges.add(f.tl1); }
+  for (const t of dp.transitions) { edges.add(t.t0); edges.add(t.t1); }
+  const es = [...edges].filter((t) => t > -eps && t <= dp.dur + eps).sort((a, b) => a - b);
+  const baseAt = (t) => dp.base.find((b) => b.tl0 <= t + eps && t < b.tl1 - eps) || null;
+  const segs = [];
+  for (let k = 0; k < es.length - 1; k++) {
+    const a = es[k], b = es[k + 1];
+    if (b - a < 0.02 || a >= dp.dur - eps) continue;
+    const mid = (a + b) / 2;
+    const clip = baseAt(mid);
+    let trans = dp.transitions.find((t) => mid > t.t0 + eps && mid < t.t1 - eps) || null;
+    if (trans) trans = Object.assign({}, trans, { end: trans.t1 >= dp.dur - 0.06 });
+    segs.push({
+      t0: a, t1: b, clip, trans,
+      ov: dp.overlays.filter((o) => o.tl0 <= mid + eps && mid < o.tl1 - eps),
+      fl: dp.filterEvents.filter((f) => f.tl0 <= mid + eps && mid < f.tl1 - eps).sort((x, y) => x.tag - y.tag),
+      clipIndex: clip ? dp.base.indexOf(clip) : -1,
+    });
+  }
+  return segs;
+}
+
+const dimsCache = new Map();
+function probeDims(ff, file) {
+  if (dimsCache.has(file)) return dimsCache.get(file);
+  return new Promise((resolve) => {
+    const p = spawn(ff, ["-hide_banner", "-i", file], { stdio: ["ignore", "ignore", "pipe"] });
+    let tail = "";
+    p.stderr.on("data", (d) => { tail += d.toString(); });
+    p.on("error", () => resolve(null));
+    p.on("close", () => {
+      const m = tail.match(/,\s(\d{2,5})x(\d{2,5})[\s,\[]/);
+      const r = m ? { w: +m[1], h: +m[2] } : null;
+      dimsCache.set(file, r);
+      resolve(r);
+    });
+  });
+}
+
+/* draw box layout: contain-fit into canvas, then scale %, then anchor at position */
+function pipLayout(transform, dw0, dh0, W, H) {
+  const fit = Math.min(W / dw0, H / dh0);
+  const sx = transform ? transform.sx / 100 : 1, sy = transform ? transform.sy / 100 : 1;
+  const dw = Math.max(2, Math.round(dw0 * fit * sx));
+  const dh = Math.max(2, Math.round(dh0 * fit * sy));
+  const px = transform ? transform.px : 0.5, py = transform ? transform.py : 0.5;
+  return { dw, dh, x: Math.round(px * W - dw / 2), y: Math.round(py * H - dh / 2) };
+}
+
+/* build ffmpeg input list + filtergraph for one segment */
+function buildSegPlan(s, gx) {
+  const W = gx.W, H = gx.H, fps = gx.fps, files = gx.files, dp = gx.dp;
+  const dur = s.t1 - s.t0;
+  const scalePad = "scale=" + W + ":" + H + ":force_original_aspect_ratio=decrease:flags=lanczos,pad=" + W + ":" + H + ":(ow-iw)/2:(oh-ih)/2,setsar=1";
+  const srcAt = (clip, t) => clip.in + Math.max(0, t - clip.tl0);
+  const simple = !s.trans && !s.ov.length && !s.fl.length && !(s.clip && s.clip.transform);
+  if (simple && s.clip) {
+    const ss = srcAt(s.clip, s.t0);
+    return {
+      inputs: ["-ss", ss.toFixed(3), "-t", Math.max(0.1, srcAt(s.clip, s.t1) - ss).toFixed(3), "-i", files.get(s.clip.guid)],
+      vf: scalePad + ",fps=" + fps, graph: null, map: null,
+    };
+  }
+  const parts = [], inputs = [];
+  let idxIn = 0;
+  const addInput = (arr) => { const id = idxIn++; inputs.push(...arr); return id; };
+  let cur;
+  if (s.trans && !s.trans.end) {
+    const tr = s.trans;
+    const A = dp.base.find((b) => b.tl1 > tr.cut - 0.05 && b.tl0 < tr.cut) || s.clip;
+    const B = dp.base.find((b) => b.tl0 < tr.cut + 0.05 && b.tl1 > tr.cut) || null;
+    if (A && B && files.get(A.guid) && files.get(B.guid)) {
+      const dA = Math.max(0.1, tr.cut - s.t0), dB = Math.max(0.1, s.t1 - tr.cut), D = dA + dB;
+      const idA = addInput(["-ss", srcAt(A, s.t0).toFixed(3), "-t", dA.toFixed(3), "-i", files.get(A.guid)]);
+      const idB = addInput(["-ss", srcAt(B, tr.cut).toFixed(3), "-t", dB.toFixed(3), "-i", files.get(B.guid)]);
+      parts.push("[" + idA + ":v]" + scalePad + ",fps=" + fps + ",tpad=stop_mode=clone:stop_duration=" + dB.toFixed(3) + "[a0]");
+      parts.push("[" + idB + ":v]" + scalePad + ",fps=" + fps + ",tpad=start_mode=clone:start_duration=" + dA.toFixed(3) + "[b0]");
+      parts.push("[a0][b0]xfade=transition=" + tr.kind + ":duration=" + D.toFixed(3) + ":offset=0.0001[xf]");
+      cur = "[xf]";
+    } else { s.trans = Object.assign({}, s.trans, { end: true }); cur = null; }
+  }
+  if (!cur) {
+    const c = s.clip;
+    if (!c) { // gap -> black
+      const idC = addInput(["-f", "lavfi", "-t", dur.toFixed(3), "-i", "color=black:s=" + W + "x" + H + ":r=" + fps]);
+      parts.push("[" + idC + ":v]null[cv0]");
+      cur = "[cv0]";
+    } else {
+      const ss0 = srcAt(c, s.t0);
+      const idB0 = addInput(["-ss", ss0.toFixed(3), "-t", Math.max(0.1, srcAt(c, s.t1) - ss0).toFixed(3), "-i", files.get(c.guid)]);
+      if (c.transform && gx.dims) {
+        const dm = gx.dims.get(c.guid) || { w: 1920, h: 1080 };
+        const L = pipLayout(c.transform, dm.w, dm.h, W, H);
+        const idC = addInput(["-f", "lavfi", "-t", dur.toFixed(3), "-i", "color=black:s=" + W + "x" + H + ":r=" + fps]);
+        parts.push("[" + idB0 + ":v]scale=" + L.dw + ":" + L.dh + ":flags=lanczos,setsar=1[bs]");
+        parts.push("[" + idC + ":v][bs]overlay=" + L.x + ":" + L.y + "[cv0]");
+        cur = "[cv0]";
+      } else {
+        parts.push("[" + idB0 + ":v]" + scalePad + "[cv0]");
+        cur = "[cv0]";
+      }
+    }
+  }
+  let head = "";
+  if (s.trans && s.trans.end) head = "fade=t=out:st=0:d=" + dur.toFixed(3) + ",";
+  const steps = [];
+  for (const o of s.ov) steps.push({ tag: o.tag, type: "ov", o });
+  for (const f of s.fl) steps.push({ tag: f.tag, type: "fx", f });
+  steps.sort((a, b) => a.tag - b.tag);
+  let n = 0;
+  for (const st of steps) {
+    const nxt = "[c" + (++n) + "]";
+    if (st.type === "ov") {
+      const file = files.get(st.o.guid);
+      const dm = (file && dimsCache.get(file)) || { w: 1920, h: 1080 };
+      const L = pipLayout(st.o.transform, dm.w, dm.h, W, H);
+      const id = addInput(["-loop", "1", "-framerate", String(fps), "-t", dur.toFixed(3), "-i", file]);
+      parts.push("[" + id + ":v]scale=" + L.dw + ":" + L.dh + ":flags=lanczos,setsar=1[o" + n + "]");
+      parts.push(cur + "[o" + n + "]overlay=" + L.x + ":" + L.y + nxt);
+    } else {
+      let chain;
+      if (/heartbeat/i.test(st.f.name)) {
+        // NOTE: d=1 zoompan is nondeterministic in some static builds (frame counter race); d=2 is stable.
+        chain = "fps=" + fps + ",zoompan=z='1+0.045*abs(sin(2*PI*1.5*(in/" + fps + ")))':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=2:s=" + W + "x" + H + ":fps=" + (fps * 2);
+      } else {
+        const fs2 = filmoraFilterChain(st.f.name, W, H);
+        chain = fs2.length ? fs2.join(",") : "null";
+      }
+      parts.push(cur + chain + nxt);
+    }
+    cur = nxt;
+  }
+  parts.push(cur + head + "fps=" + fps + ",format=yuv420p[vout]");
+  return { inputs, graph: parts.join(";"), map: "[vout]", vf: null };
 }
 
 /* ============================ render pipeline ============================ */
@@ -198,6 +476,7 @@ function runFfmpeg(ff, args, onTime) {
 async function extractMedia(ff, ctx) {
   const Z = globalThis.__ZIPLITE__;
   const guids = new Set([...ctx.parsed.videoClips, ...ctx.parsed.audioClips].map((c) => c.guid));
+  if (ctx.extraGuids) for (const g of ctx.extraGuids) guids.add(g);
   const map = new Map();
   let i = 0;
   const mediaDir = path.join(ctx.outDir, "media");
@@ -232,9 +511,21 @@ async function renderJob(opt) {
   const t0 = Date.now();
   setStatus({ state: "parsing", msg: "プロジェクト解析中…", frac: 0.01, clips: [], outName: null, outSize: 0 });
   const proj = await parseProject(bundlePath);
-  const { pinfo, parsed } = proj;
-  if (limit) parsed.videoClips = parsed.videoClips.slice(0, limit);
-  appendLog("プロジェクト: " + pinfo.project_file_name + " / クリップ" + parsed.videoClips.length + " / " + parsed.duration.toFixed(1) + "s");
+  const { pinfo } = proj;
+  const dp = deepParse(proj.rawTl, proj.mediaMap);
+  if (limit) {
+    const kept = dp.base.slice(0, limit);
+    const endT = kept.length ? kept[kept.length - 1].tl1 : 0;
+    dp.base = kept; dp.dur = endT;
+    dp.overlays = dp.overlays.filter((o) => o.tl0 < endT - 0.01);
+    dp.filterEvents = dp.filterEvents.filter((f) => f.tl0 < endT - 0.01);
+    dp.transitions = dp.transitions.filter((t) => t.t0 < endT - 0.01);
+    dp.audioFades = dp.audioFades.filter((f) => f.cut < endT);
+  }
+  appendLog("プロジェクト: " + pinfo.project_file_name + " / クリップ" + dp.base.length +
+    " / レイヤー" + (dp.overlays.length + 1) + " / フィルター" + dp.filterEvents.length +
+    " / トランジション" + dp.transitions.length + " / " + dp.dur.toFixed(1) + "s");
+  if (!dp.base.length) throw new Error("映像クリップが見つかりません");
 
   const enc = await detectEncoder(ff);
   setStatus({ encoder: enc.label });
@@ -242,57 +533,84 @@ async function renderJob(opt) {
   const stamp = w + "x" + h + "@" + fps;
   const outDir = path.join(outRoot(), stamp);
   fs.mkdirSync(outDir, { recursive: true });
-  const ctx = { src: proj.src, entries: proj.entries, pinfo, parsed, mediaMap: proj.mediaMap, outDir };
+  const ctx = {
+    src: proj.src, entries: proj.entries, pinfo, parsed: proj.parsed, mediaMap: proj.mediaMap, outDir,
+    extraGuids: new Set(dp.overlays.map((o) => o.guid)),
+  };
   const logf = fs.openSync(path.join(outDir, "render.log"), "a");
-  const logLn = (s) => { fs.writeSync(logf, s + "\n"); appendLog(s); };
+  const logLn = (s2) => { fs.writeSync(logf, s2 + "\n"); appendLog(s2); };
 
   try {
     setStatus({ state: "extract", msg: "素材を展開中…", frac: 0.02 });
     const mediaMap = await extractMedia(ff, ctx);
 
-    const clips = parsed.videoClips;
+    // probe image/base dims (needed for layered placement)
+    const dims = new Map();
+    for (const o of dp.overlays) {
+      const f = mediaMap.get(o.guid);
+      if (f && !dims.has(o.guid)) dims.set(o.guid, await probeDims(ff, f));
+    }
+    for (const b of dp.base) {
+      if (b.transform && !dims.has(b.guid)) dims.set(b.guid, await probeDims(ff, mediaMap.get(b.guid)));
+    }
+
+    const segs = buildSegments(dp);
+    logLn("セグメント: " + segs.length + "（レイヤー構成を含む全イベント境界で分割）");
+    const gctx = { W: w, H: h, fps, files: mediaMap, dp, dims };
+
     setStatus({
       state: "render", msg: "映像レンダリング…", frac: 0.08,
-      clips: clips.map((c, i) => ({ i, name: c.mediaName, state: "pending", frac: 0 })),
+      clips: dp.base.map((c, i) => ({ i, name: c.name, state: "pending", frac: 0 })),
     });
-    const clipState = (i, patch) => {
-      status.clips[i] = Object.assign({}, status.clips[i], patch);
+    const clipSegs = dp.base.map(() => []);
+    segs.forEach((sg, i) => { if (sg.clipIndex >= 0) clipSegs[sg.clipIndex].push(i); });
+    const clipLen = dp.base.map((b) => b.tl1 - b.tl0);
+    const clipState = (i, patch) => { status.clips[i] = Object.assign({}, status.clips[i], patch); };
+    const refreshClip = (ci) => {
+      if (ci < 0) return;
+      const list = clipSegs[ci];
+      const f = list.reduce((a, i2) => a + (segs[i2].t1 - segs[i2].t0) * (segs[i2]._f || 0), 0) / Math.max(0.01, clipLen[ci]);
+      clipState(ci, { frac: Math.min(1, f) });
     };
 
-    const pool = enc.hw ? 3 : 2;
+    const pool = enc.hw ? (enc.name === "h264_nvenc" ? 3 : 2) : 2;
     let encBroken = false; // HW encoder died mid-render -> fall back to CPU
     let idx = 0;
-    const vf = "scale=" + w + ":" + h + ":force_original_aspect_ratio=decrease:flags=lanczos,pad=" + w + ":" + h + ":(ow-iw)/2:(oh-ih)/2,fps=" + fps;
-    let encodedSec = 0, wall0 = Date.now();
+    const total = segs.reduce((a, x) => a + (x.t1 - x.t0), 0);
+    const wall0 = Date.now();
 
     async function worker() {
       while (true) {
         const i = idx++;
-        if (i >= clips.length) return;
-        const c = clips[i];
+        if (i >= segs.length) return;
+        const sg = segs[i];
         const seg = path.join(outDir, "seg" + String(i).padStart(3, "0") + ".mp4");
-        const dur = c.tlend - c.tl;
-        clipState(i, { state: "run", frac: 0 });
+        const dur = sg.t1 - sg.t0;
+        if (sg.clipIndex >= 0 && status.clips[sg.clipIndex]) clipState(sg.clipIndex, { state: "run" });
         const useEnc = (encBroken || !enc.hw) && enc.name !== "libx264"
           ? { name: "libx264", label: "CPU (libx264)", args: [], hw: false } : enc;
         if (!(fs.existsSync(seg) && fs.statSync(seg).size > 0)) {
-          for (const tryEnc of [useEnc, { name: "libx264", hw: false }]) {
+          const plan = buildSegPlan(sg, gctx);
+          for (const tryEnc of [useEnc, { name: "libx264", hw: false, label: "CPU (libx264)", args: [] }]) {
             const tmp = seg + ".tmp.mp4";
-            const r = await runFfmpeg(ff, [
-              "-hide_banner", "-y",
-              "-ss", c.in.toFixed(3), "-t", (c.out - c.in).toFixed(3), "-i", mediaMap.get(c.guid),
-              "-map", "0:v:0", "-map", "0:a:0?",
-              "-vf", vf, ...encArgsFor(tryEnc, w, h, fps),
-              "-pix_fmt", "yuv420p",
-              "-c:a", "aac", "-b:a", "192k", "-ar", "44100", "-ac", "2",
-              "-t", dur.toFixed(3), tmp,
-            ], (sec) => {
-              clipState(i, { frac: Math.min(1, sec / dur) });
-              const done = status.clips.reduce((a, x) => a + (x.state === "done" ? 1 : x.frac), 0);
+            const args = ["-hide_banner", "-y", ...plan.inputs];
+            if (plan.graph) args.push("-filter_complex", plan.graph, "-map", plan.map);
+            else args.push("-vf", plan.vf);
+            let encA = encArgsFor(tryEnc, w, h, fps);
+            if (plan.graph && /zoompan/.test(plan.graph)) {
+              // BUG WORKAROUND: libx264 VBV (maxrate+bufsize together) makes zoompan's
+              // frame counter stick (z frozen) in ffmpeg 7.0.x static builds -> drop VBV here.
+              encA = encA.filter((x, k) => x !== "-maxrate" && x !== "-bufsize" && encA[k - 1] !== "-maxrate" && encA[k - 1] !== "-bufsize" ? true : false);
+            }
+            args.push("-an", ...encA, "-pix_fmt", "yuv420p", "-t", dur.toFixed(3), tmp);
+            const r = await runFfmpeg(ff, args, (sec) => {
+              sg._f = Math.min(1, sec / dur);
+              refreshClip(sg.clipIndex);
+              const doneNow = segs.reduce((a, x) => a + (x.t1 - x.t0) * (x._f || 0), 0);
               setStatus({
-                frac: 0.08 + 0.72 * (done / clips.length),
-                msg: "映像 " + Math.round(done) + "/" + clips.length + " クリップ",
-                speedX: (Date.now() - wall0) > 0 ? +((encodedSec + done) / ((Date.now() - wall0) / 1000) / Math.max(1, pool)).toFixed(2) : null,
+                frac: 0.08 + 0.72 * (doneNow / total),
+                msg: "映像 " + Math.round(doneNow) + "s / " + Math.round(total) + "s（" + segs.length + "セグメント）",
+                speedX: ((doneNow / Math.max(1, (Date.now() - wall0) / 1000)) / Math.max(1, pool)).toFixed(2) + "x",
               });
             });
             if (r.code === 0) {
@@ -308,15 +626,18 @@ async function renderJob(opt) {
             if (tryEnc.name === "libx264") throw new Error("セグメント" + (i + 1) + " のエンコードに失敗");
           }
         }
-        clipState(i, { state: "done", frac: 1 });
-        setStatus({ msg: "映像 " + (i + 1) + "/" + clips.length + " クリップ完了" });
+        sg._f = 1;
+        refreshClip(sg.clipIndex);
+        if (sg.clipIndex >= 0 && clipSegs[sg.clipIndex].every((i2) => segs[i2]._f >= 1)) {
+          clipState(sg.clipIndex, { state: "done", frac: 1 });
+        }
       }
     }
-    await Promise.all(Array.from({ length: Math.min(pool, clips.length) }, worker));
+    await Promise.all(Array.from({ length: Math.min(pool, segs.length) }, worker));
 
     setStatus({ state: "concat", msg: "映像を連結中…", frac: 0.82 });
     const listFile = path.join(outDir, "list.txt");
-    fs.writeFileSync(listFile, clips.map((_, i) => "file '" + path.join(outDir, "seg" + String(i).padStart(3, "0") + ".mp4") + "'").join("\n"));
+    fs.writeFileSync(listFile, segs.map((_, i) => "file '" + path.join(outDir, "seg" + String(i).padStart(3, "0") + ".mp4") + "'").join("\n"));
     let r = await runFfmpeg(ff, ["-hide_banner", "-y", "-f", "concat", "-safe", "0", "-i", listFile, "-c", "copy", path.join(outDir, "video.mp4")]);
     if (r.code !== 0) throw new Error("連結失敗: " + r.tail.slice(-200));
 
@@ -324,27 +645,42 @@ async function renderJob(opt) {
     const safe = (pinfo.project_file_name || "output").replace(/[\\/:*?"<>|\x00-\x1f]+/g, "_").replace(/[. ]+$/, "").slice(0, 60) || "output";
     const outFile = path.join(outRoot(), safe + "_" + stamp + ".mp4");
     const audioInputs = [];
-    for (const c of parsed.audioClips) {
+    for (const c of proj.parsed.audioClips) {
+      if (limit && c.tl >= dp.dur - 0.01) continue;
       const f = mediaMap.get(c.guid);
       if (!f) continue;
       if (/\.(mp4|mov|mkv|webm)$/i.test(f) && !(await hasAudio(ff, f))) continue;
       audioInputs.push({ c, f });
     }
+    const fadeInOf = (c) => (dp.audioFades.find((fd) => Math.abs(fd.cut - c.tl) < 0.2) ? 1 : 0);
+    const fadeOutOf = (c) => {
+      for (const fd of dp.audioFades) {
+        if (Math.abs(fd.cut - c.tlend) < 0.2) return { st: Math.max(0, fd.cut - 1 - c.tl), d: 1 };
+      }
+      for (const fd of dp.audioFades) {
+        if (fd.t1 >= dp.dur - 0.06 && Math.abs(c.tlend - fd.t1) < 0.2) return { st: Math.max(0, fd.t0 - c.tl), d: Math.max(0.5, fd.t1 - fd.t0) };
+      }
+      return null;
+    };
     if (audioInputs.length) {
       const args = ["-hide_banner", "-y"];
       const fc = [];
       audioInputs.forEach((ai, k) => {
         args.push("-i", ai.f);
         const delay = Math.round(Math.max(0, ai.c.tl) * 1000);
-        fc.push("[" + k + ":a]atrim=start=" + ai.c.in.toFixed(3) + ":end=" + ai.c.out.toFixed(3) +
-          ",asetpts=PTS-STARTPTS,adelay=" + delay + "|" + delay + "[a" + k + "]");
+        let chain = "[" + k + ":a]atrim=start=" + ai.c.in.toFixed(3) + ":end=" + ai.c.out.toFixed(3) + ",asetpts=PTS-STARTPTS";
+        if (fadeInOf(ai.c)) chain += ",afade=t=in:st=0:d=1";
+        const fo = fadeOutOf(ai.c);
+        if (fo) chain += ",afade=t=out:st=" + fo.st.toFixed(3) + ":d=" + fo.d.toFixed(3);
+        chain += ",adelay=" + delay + "|" + delay + "[a" + k + "]";
+        fc.push(chain);
       });
       fc.push(audioInputs.map((_, k) => "[a" + k + "]").join("") +
         "amix=inputs=" + audioInputs.length + ":normalize=0:dropout_transition=0,alimiter=limit=0.95," +
         "aformat=sample_fmts=fltp:sample_rates=44100:channel_layouts=stereo[aout]");
       const audioFile = path.join(outDir, "audio.m4a");
       r = await runFfmpeg(ff, args.concat(["-filter_complex", fc.join(";"), "-map", "[aout]", "-c:a", "aac", "-b:a", "256k",
-        "-t", (parsed.duration + 0.5).toFixed(3), audioFile]));
+        "-t", (dp.dur + 0.5).toFixed(3), audioFile]));
       if (r.code !== 0) throw new Error("音声ミックス失敗: " + r.tail.slice(-200));
       setStatus({ state: "mux", msg: "最終書き出し中…", frac: 0.96 });
       r = await runFfmpeg(ff, ["-hide_banner", "-y", "-i", path.join(outDir, "video.mp4"), "-i", audioFile,
@@ -406,7 +742,7 @@ const PAGE = '<!doctype html><html lang="ja"><head><meta charset="utf-8">' +
 '<video id="player" controls playsinline preload="metadata"></video>' +
 '<div class="row"><a id="dlA" href="#" style="text-decoration:none"><button class="green">⬇ 保存（ダウンロード）</button></a>' +
 '<button id="openDir">📁 保存フォルダを開く</button></div></div>' +
-'<p class="sub" style="margin-top:18px">再現: カット編集（トリミング・並び）＋音声ミックス（BGM＋クリップ音）。Filmora独自エフェクト・テキスト等は非対応。<br>GPU (NVIDIA/Intel/AMD) があれば自動でハードウェアエンコードを使用します。</p>' +
+'<p class="sub" style="margin-top:18px">再現: カット編集＋音声ミックス＋<b>多レイヤー画像（位置・倍率）・フィルター・トランジション・フェード</b>。Filmora純正の素材動画を使う効果（オーバーレイ系）は色調・グレインで近似的に再現します。<br>GPU (NVIDIA/Intel内蔵/AMD) があれば自動でハードウェアエンコードを使用します。</p>' +
 '</div><script>' +
 '(function(){' +
 'var drop=document.getElementById("drop"),file=document.getElementById("file"),dropTxt=document.getElementById("dropTxt");' +
@@ -430,7 +766,7 @@ const PAGE = '<!doctype html><html lang="ja"><head><meta charset="utf-8">' +
 ' xhr.onerror=function(){dropTxt.textContent="❌ アップロード失敗";};' +
 ' xhr.send(f);}' +
 'async function loadProj(p){var r=await fetch("/api/project?path="+encodeURIComponent(p));var j=await r.json();' +
-' if(j.ok){projInfo.innerHTML="プロジェクト: <b>"+esc(j.project.name)+"</b> ／ 長さ <b>"+j.project.dur.toFixed(1)+"s</b> ／ 映像クリップ <b>"+j.project.clips+"</b> ／ 音声 <b>"+j.project.audio+"</b>";}}' +
+' if(j.ok){var f=j.project.feat;projInfo.innerHTML="プロジェクト: <b>"+esc(j.project.name)+"</b> ／ 長さ <b>"+j.project.dur.toFixed(1)+"s</b> ／ 映像クリップ <b>"+j.project.clips+"</b> ／ 音声 <b>"+j.project.audio+"</b>"+(f?" ／ レイヤー <b>"+f.layers+"</b>・フィルター <b>"+f.filters+"</b>・遷移 <b>"+f.trans+"</b> を再現":"");}}' +
 'go.addEventListener("click",async function(){if(!uploaded)return;go.disabled=true;doneCard.classList.add("hidden");progCard.classList.remove("hidden");' +
 ' var parts=res.value.split("x");var body=JSON.stringify({path:uploaded,w:+parts[0],h:+parts[1],fps:+fps.value});' +
 ' var r=await fetch("/api/render",{method:"POST",headers:{"Content-Type":"application/json"},body:body});' +
@@ -501,12 +837,18 @@ function startServer(opts) {
       (async () => {
         try {
           const proj = await parseProject(u.searchParams.get("path"));
+          let feat = null;
+          try {
+            const d = deepParse(proj.rawTl, proj.mediaMap);
+            feat = { layers: d.overlays.length + 1, filters: d.filterEvents.length, trans: d.transitions.length };
+          } catch (e) {}
           const info = {
             ok: true, project: {
               name: proj.pinfo.project_file_name,
               dur: proj.parsed.duration,
               clips: proj.parsed.videoClips.length,
               audio: proj.parsed.audioClips.length,
+              feat,
             },
           };
           proj.src.close();
